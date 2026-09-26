@@ -33,8 +33,8 @@ pip install pandas numpy torch scikit-learn matplotlib
 
 - [x] 프로젝트 방향 및 평가 방식 확정
 - [x] 데이터셋 확보 및 라이선스 확인
-- [ ] 데이터 전처리 파이프라인 구현 (진행 중)
-- [ ] Baseline 모델 (최근 N회 평균) 구현
+- [x] 데이터 전처리 파이프라인 구현
+- [x] Baseline 모델 (최근 N회 평균) 구현
 - [ ] 선형회귀/MLP, LSTM, Transformer 비교
 - [ ] 목표 기반 코칭 생성
 - [ ] 온디바이스 경량화 벤치마크
