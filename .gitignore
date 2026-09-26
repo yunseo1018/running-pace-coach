@@ -1,0 +1,8 @@
+*.json.gz
+*.json
+*.npy
+*.gpx
+*.tcx
+personal_data/
+__pycache__/
+*.pyc
