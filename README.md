@@ -35,6 +35,10 @@ pip install pandas numpy torch scikit-learn matplotlib
 - [x] 데이터셋 확보 및 라이선스 확인
 - [x] 데이터 전처리 파이프라인 구현
 - [x] Baseline 모델 (최근 N회 평균) 구현
+- [x] 태스크 재정의 (v2): 타겟 세션 거리를 계획값으로 입력에 포함
+- [x] 평가 분할 이원화: cold-start / personalized 평가 분리
+- [x] Baseline 5종 비교 (최근 N회 평균 / last-session / median-5 / 사용자 전체 평균 / 단순 선형 추세)
+- [x] 세션 병합(merge) 정제 및 병합 전후 baseline 비교
 - [ ] 선형회귀/MLP, LSTM, Transformer 비교
 - [ ] 목표 기반 코칭 생성
 - [ ] 온디바이스 경량화 벤치마크
