@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-6단계 (v2, 5주차): Personalized 평가용 분할 — 사용자 내 시간순 history/temporal hold-out.
+6단계 (v3, 10월 2주차 X 정의 동기화): Personalized 평가용 분할 — 사용자 내 시간순 history/temporal hold-out.
 
 CLAUDE.md 배경: 기존 cold-start(user-disjoint 80/20, 03단계) 분할은
 "처음 보는 사용자에게 얼마나 잘 일반화되는지"만 측정한다. 이 프로젝트의 실제
@@ -16,13 +16,17 @@ hold-out(=personalized test)으로 나눈다.
 cold-start에서는 train(또는 test) 쪽에 있어도, 여기서는 그 사용자의 세션이
 history/hold-out으로 다시 나뉜다 — "다른 질문"에 대한 "다른 분할"이기 때문에
 의도적으로 이렇게 설계했다.
+
+10월 2주차 수정: X에 타깃 세션의 거리를 포함하던 v2 방식은 leakage였음이
+확인되어(docs/feature_availability.md 참고) 04단계와 동일하게 "과거 5개
+세션만" 쓰도록 되돌렸다. 타깃 세션 거리를 쓰는 실험은
+10_posthoc_distance_condition.py로만 분리 보존한다.
 """
 
 import io
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -33,7 +37,6 @@ TEST_OUTPUT_PATH = Path("data") / "personalized_test_dataset.pkl"
 
 N_PAST_SESSIONS = 5
 PAST_FEATURE_COLUMNS = ["distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
-TARGET_PLAN_COLUMN = "distance_km"
 TARGET_COLUMN = "avg_pace_sec_per_km"
 
 # history(앞부분) : temporal hold-out(뒷부분) 비율. 03단계 cold-start와 같은
@@ -43,7 +46,7 @@ HISTORY_RATIO = 0.8
 
 
 def build_windows_for_user(user_df):
-    """04단계와 동일한 (X, y) 윈도우 생성 로직 (v2: 타겟 세션 거리를 계획값으로 X에 포함)."""
+    """04단계와 동일한 (X, y) 윈도우 생성 로직 (v3: 과거 5개 세션만, 타깃 세션 값은 X에 없음)."""
     samples = []
     n_sessions = len(user_df)
     for start in range(0, n_sessions - N_PAST_SESSIONS):
@@ -55,9 +58,7 @@ def build_windows_for_user(user_df):
         assert target_index not in past_indices
         assert target_index == max(past_indices) + 1
 
-        past_values = past_window[PAST_FEATURE_COLUMNS].to_numpy().flatten()
-        target_plan_value = np.array([target_row[TARGET_PLAN_COLUMN]])
-        x_values = np.concatenate([past_values, target_plan_value])
+        x_values = past_window[PAST_FEATURE_COLUMNS].to_numpy().flatten()  # shape (15,)
 
         samples.append(
             {
