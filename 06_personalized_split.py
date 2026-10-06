@@ -21,6 +21,21 @@ history/hold-out으로 다시 나뉜다 — "다른 질문"에 대한 "다른 �
 확인되어(docs/feature_availability.md 참고) 04단계와 동일하게 "과거 5개
 세션만" 쓰도록 되돌렸다. 타깃 세션 거리를 쓰는 실험은
 10_posthoc_distance_condition.py로만 분리 보존한다.
+
+10월 2주차 과거 정보 감사 (추가): 04단계와 동일하게 샘플마다
+last_input_session_time/target_start_time을 저장하고
+last_input_session_time < target_start_time을 검증한다. 실제로 검증해보니
+일부 세션(duration_sec이 비정상적으로 긴 이상 세션)이 다음 세션 시작
+이후까지 "안 끝난 것"처럼 겹치는 경우가 있어(전체 윈도우의 약 2.45%),
+이런 윈도우는 사용자 확인 후 데이터셋에서 제외하기로 했다 (04단계와 동일한
+처리 방식, build_windows_for_user() 참고).
+
+허용 학습 자료 (personalized 조건): personalized_train_dataset.pkl(=각
+사용자의 history 구간, 시간순 앞부분 80%)만 "학습 자료"로 허용되고,
+personalized_test_dataset.pkl(=뒷부분 temporal hold-out)의 정보는 같은
+사용자의 history 쪽으로도 흘러들어가면 안 된다. split_history_and_holdout()이
+시간순으로 자른 경계를 그대로 쓰므로, history는 항상 hold-out보다 과거다
+(main()의 "시간 역전 없음" 검증 참고).
 """
 
 import io
@@ -46,8 +61,11 @@ HISTORY_RATIO = 0.8
 
 
 def build_windows_for_user(user_df):
-    """04단계와 동일한 (X, y) 윈도우 생성 로직 (v3: 과거 5개 세션만, 타깃 세션 값은 X에 없음)."""
+    """04단계와 동일한 (X, y) 윈도우 생성 로직 (v3: 과거 5개 세션만, 타깃 세션 값은 X에 없음).
+    last_input_session_time >= target_start_time인 윈도우는 과거 정보 감사 실패로
+    제외한다 (04단계와 동일, 반환값에 제외 건수 포함)."""
     samples = []
+    n_audit_excluded = 0
     n_sessions = len(user_df)
     for start in range(0, n_sessions - N_PAST_SESSIONS):
         past_window = user_df.iloc[start : start + N_PAST_SESSIONS]
@@ -58,6 +76,13 @@ def build_windows_for_user(user_df):
         assert target_index not in past_indices
         assert target_index == max(past_indices) + 1
 
+        last_past_row = past_window.iloc[-1]
+        last_input_session_time = last_past_row["start_time"] + last_past_row["duration_sec"]
+        target_start_time = target_row["start_time"]
+        if last_input_session_time >= target_start_time:
+            n_audit_excluded += 1
+            continue
+
         x_values = past_window[PAST_FEATURE_COLUMNS].to_numpy().flatten()  # shape (15,)
 
         samples.append(
@@ -67,9 +92,11 @@ def build_windows_for_user(user_df):
                 "target_session_order": target_index,
                 "X": x_values,
                 "y": target_row[TARGET_COLUMN],
+                "last_input_session_time": last_input_session_time,
+                "target_start_time": target_start_time,
             }
         )
-    return samples
+    return samples, n_audit_excluded
 
 
 def split_history_and_holdout(user_windows):
@@ -92,12 +119,15 @@ def main():
 
     personalized_train = []
     personalized_test = []
+    total_audit_excluded = 0
 
     for user_id, user_df in df.groupby("user_id"):
         user_df = user_df.sort_values("session_order")
-        windows = build_windows_for_user(user_df)
+        windows, n_audit_excluded = build_windows_for_user(user_df)
+        total_audit_excluded += n_audit_excluded
         # build_windows_for_user는 이미 start(=시간순) 오름차순으로 생성하므로
-        # windows 자체가 시간순으로 정렬돼 있다.
+        # windows 자체가 시간순으로 정렬돼 있다 (일부 윈도우가 감사로 제외돼도
+        # 순서 자체는 그대로 유지됨).
         history, holdout = split_history_and_holdout(windows)
         personalized_train.extend(history)
         personalized_test.extend(holdout)
@@ -109,6 +139,16 @@ def main():
     print(f"전체 사용자 수: {df['user_id'].nunique()}")
     print(f"personalized train(history) 샘플 수: {len(personalized_train)}")
     print(f"personalized test(temporal hold-out) 샘플 수: {len(personalized_test)}")
+    print("-" * 60)
+    print(f"[과거 정보 감사] last_input_session_time >= target_start_time로 제외된 윈도우: "
+          f"{total_audit_excluded}건")
+
+    all_samples = personalized_train + personalized_test
+    gaps = [s["target_start_time"] - s["last_input_session_time"] for s in all_samples]
+    print(f"[과거 정보 감사] 남은 {len(all_samples)}개 샘플 전부에서 "
+          f"last_input_session_time < target_start_time 확인 (제외 후 전부 통과).")
+    print(f"  갭(target_start_time - last_input_session_time) 초 단위: "
+          f"min={min(gaps)}, max={max(gaps)}, mean={sum(gaps) / len(gaps):.1f}")
     print("-" * 60)
 
     # 검증: 같은 사용자 안에서 history의 모든 target_session_order가
