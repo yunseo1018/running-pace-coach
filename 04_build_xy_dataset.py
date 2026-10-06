@@ -19,10 +19,9 @@
 X = 과거 5개 세션 각각의 (actual_distance_km, 평균 페이스, 평균 심박) (15개)
 y = 6번째 세션의 avg_pace_sec_per_km (결과값, 숫자 하나)
 
-참고: 내부 DataFrame 컬럼명은 (01단계 이후 쭉 써온) distance_km이지만,
-의미상 이 값은 GPS로 계산한 "완주 후 확정되는 실제 거리"이므로
-docs/feature_availability.md의 명명을 따라 X 컬럼 설명/출력에서는
-actual_distance_km으로 표기한다.
+참고: 11_migrate_rename_distance_column.py로 캐시된 pkl의 distance_km
+컬럼을 actual_distance_km로 리네임했으므로, 이 스크립트도 그 이름을
+그대로 사용한다 (01단계 이후 쭉 distance_km이던 것을 10월 2주차에 정정).
 """
 
 import io
@@ -42,22 +41,16 @@ TEST_OUTPUT_PATH = Path("data") / "test_dataset.pkl"
 
 N_PAST_SESSIONS = 5  # CLAUDE.md: N=5로 고정
 
-# 과거 세션에서 쓰는 피처 (내부 DataFrame 컬럼명 -> 보고용 표시명).
-# 과거(이미 끝난) 세션의 값이므로 leakage가 아니다 — 금지되는 것은
-# "타깃 세션 자신의" 결과값뿐이다 (아래 main()의 leakage 체크 참고).
-PAST_FEATURE_COLUMNS = ["distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
-PAST_FEATURE_DISPLAY_NAMES = {
-    "distance_km": "actual_distance_km",
-    "avg_pace_sec_per_km": "avg_pace_sec_per_km",
-    "avg_heart_rate": "avg_heart_rate",
-}
+# 과거 세션에서 쓰는 피처. 과거(이미 끝난) 세션의 값이므로 leakage가 아니다
+# — 금지되는 것은 "타깃 세션 자신의" 결과값뿐이다 (아래 main()의 leakage 체크 참고).
+PAST_FEATURE_COLUMNS = ["actual_distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
 
 TARGET_COLUMN = "avg_pace_sec_per_km"
 
 # X 벡터(flatten된 numpy array)의 각 위치가 어떤 의미인지 설명하는 컬럼 이름 목록.
 # 과거 세션 5개 x 3피처 = 15개. 타깃 세션 관련 값은 전혀 없다 (v2와의 핵심 차이).
 X_COLUMN_NAMES = [
-    f"past[{i}].{PAST_FEATURE_DISPLAY_NAMES[col]}" for i in range(N_PAST_SESSIONS) for col in PAST_FEATURE_COLUMNS
+    f"past[{i}].{col}" for i in range(N_PAST_SESSIONS) for col in PAST_FEATURE_COLUMNS
 ]
 
 

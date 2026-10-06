@@ -36,7 +36,7 @@ TRAIN_OUTPUT_PATH = Path("data") / "personalized_train_dataset.pkl"
 TEST_OUTPUT_PATH = Path("data") / "personalized_test_dataset.pkl"
 
 N_PAST_SESSIONS = 5
-PAST_FEATURE_COLUMNS = ["distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
+PAST_FEATURE_COLUMNS = ["actual_distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
 TARGET_COLUMN = "avg_pace_sec_per_km"
 
 # history(앞부분) : temporal hold-out(뒷부분) 비율. 03단계 cold-start와 같은

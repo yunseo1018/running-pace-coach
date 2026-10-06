@@ -6,11 +6,12 @@
 학습이 필요 없는 규칙 기반 baseline이라 train 데이터는 쓰지 않고, test(평가용)
 데이터에 대해서만 예측/평가한다.
 
-5주차(v2) 업데이트: X가 [과거 5세션 x 3피처](15) + [target.distance_km](1) = 16개로
-늘어났지만, 이 baseline은 여전히 "과거 5개 세션의 페이스 평균"만 쓰므로 X의 앞 15개
-값 중 pace 위치만 읽는다 (target.distance_km은 이 baseline에서는 사용하지 않음).
+10월 2주차부터 X는 [과거 5세션 x (actual_distance_km, avg_pace_sec_per_km,
+avg_heart_rate)] = 15개뿐이며, 타깃 세션 값은 전혀 포함되지 않는다
+(04_build_xy_dataset.py 참고). 이 baseline은 과거 세션들의 avg_pace_sec_per_km만
+읽으므로 영향 없음.
 
-CLAUDE.md 데이터 분할 규칙(v2): cold-start(사용자 단위 80/20)와 personalized
+CLAUDE.md 데이터 분할 규칙: cold-start(사용자 단위 80/20)와 personalized
 (사용자 내 시간순 history/temporal hold-out) 두 가지 평가를 각각 따로 계산해서
 따로 보고한다 (하나로 합치지 않는다).
 
@@ -31,8 +32,8 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 COLD_START_TEST_PATH = Path("data") / "test_dataset.pkl"
 PERSONALIZED_TEST_PATH = Path("data") / "personalized_test_dataset.pkl"
 
-# X는 [distance_km, avg_pace_sec_per_km, avg_heart_rate] x 5세션(15) +
-# target.distance_km(1) 순서로 flatten되어 있다 (04/06단계 참고).
+# X는 [actual_distance_km, avg_pace_sec_per_km, avg_heart_rate] x 5세션(15)
+# 순서로 flatten되어 있다 (04/06단계 참고).
 # 이 baseline은 과거 세션들의 avg_pace_sec_per_km(각 3개 블록의 1번 인덱스)만 쓴다.
 N_PAST_SESSIONS = 5
 N_FEATURES_PER_PAST_SESSION = 3
@@ -40,7 +41,7 @@ PACE_FEATURE_INDEX = 1  # [distance, pace, heart_rate] 중 pace의 위치
 
 
 def extract_past_paces(x_flat):
-    """flatten된 X 벡터(길이 16)에서 과거 5개 세션의 avg_pace_sec_per_km만 뽑는다."""
+    """flatten된 X 벡터(길이 15)에서 과거 5개 세션의 avg_pace_sec_per_km만 뽑는다."""
     past_part = np.array(x_flat[: N_PAST_SESSIONS * N_FEATURES_PER_PAST_SESSION])
     x_reshaped = past_part.reshape(N_PAST_SESSIONS, N_FEATURES_PER_PAST_SESSION)
     return x_reshaped[:, PACE_FEATURE_INDEX]

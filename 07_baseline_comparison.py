@@ -2,10 +2,12 @@
 """
 7단계 (v2, 5주차): Baseline 5종을 cold-start/personalized 두 평가 방식으로 비교.
 
-CLAUDE.md "비교 모델 및 Baseline (v2)" 순서대로 5개 baseline을 구현한다.
+CLAUDE.md "비교 모델 및 Baseline" 순서대로 5개 baseline을 구현한다.
 전부 "과거 5개 세션의 페이스만 보고 단순하게 예측하면 얼마나 틀리는지"를 보는
-목적이라, X의 16번째 값(target.distance_km, 거리 조건값)은 쓰지 않고 앞 15개
-(과거 5세션 x [distance_km, avg_pace_sec_per_km, avg_heart_rate])만 사용한다.
+목적이라, X(과거 5세션 x [actual_distance_km, avg_pace_sec_per_km, avg_heart_rate]
+= 15개, 10월 2주차부터 타깃 세션 값은 X에 전혀 없음) 중 페이스 값만 사용한다.
+(참고: test_dataset.pkl이 10_posthoc_distance_condition.py가 만든 posthoc_*
+데이터셋으로 바뀌어도 앞 15개만 읽는 구조라 안전하게 동작한다.)
 
 1. recent_avg   : 과거 5개 세션 페이스의 평균
 2. last_session : 과거 5개 중 가장 최근(5번째) 세션의 페이스 그대로
@@ -36,8 +38,7 @@ PACE_FEATURE_INDEX = 1  # [distance, pace, heart_rate] 중 pace의 위치
 
 
 def extract_past_paces(x_flat):
-    """flatten된 X 벡터(길이 16)에서 과거 5개 세션의 avg_pace_sec_per_km만 뽑는다.
-    target.distance_km(16번째 값)은 이 baseline들에서는 쓰지 않는다."""
+    """flatten된 X 벡터(길이 15)에서 과거 5개 세션의 avg_pace_sec_per_km만 뽑는다."""
     past_part = np.array(x_flat[: N_PAST_SESSIONS * N_FEATURES_PER_PAST_SESSION])
     return past_part.reshape(N_PAST_SESSIONS, N_FEATURES_PER_PAST_SESSION)[:, PACE_FEATURE_INDEX]
 

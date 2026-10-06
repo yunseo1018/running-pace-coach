@@ -34,11 +34,11 @@ TRAIN_OUTPUT_PATH = Path("data") / "posthoc_train_dataset.pkl"
 TEST_OUTPUT_PATH = Path("data") / "posthoc_test_dataset.pkl"
 
 N_PAST_SESSIONS = 5
-PAST_FEATURE_COLUMNS = ["distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
+PAST_FEATURE_COLUMNS = ["actual_distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
 
 # 타깃(6번째) 세션에서 "사후 정보"로서만 X에 포함하는 값 — actual_distance_km
 # (예전 v2에서는 "계획값"이라 불렀으나, 실제로는 완주 후 확정되는 결과값이다).
-TARGET_POSTHOC_COLUMN = "distance_km"
+TARGET_POSTHOC_COLUMN = "actual_distance_km"
 TARGET_POSTHOC_DISPLAY_NAME = "actual_distance_km"
 
 TARGET_FORBIDDEN_COLUMNS = ["avg_heart_rate", "duration_sec", "avg_pace_sec_per_km"]

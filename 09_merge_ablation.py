@@ -32,7 +32,7 @@ TEST_USERS_PATH = Path("data") / "test_user_ids.txt"
 
 N_PAST_SESSIONS = 5
 MIN_SESSIONS_REQUIRED = 6
-PAST_FEATURE_COLUMNS = ["distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
+PAST_FEATURE_COLUMNS = ["actual_distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
 TARGET_COLUMN = "avg_pace_sec_per_km"
 HISTORY_RATIO = 0.8
 
@@ -53,7 +53,7 @@ def build_eligible_sequences(session_df):
 
 def build_windows_for_user(user_df):
     """04단계의 (과거5 -> 타겟) 윈도우 생성 (이 ablation에서는 baseline 1만 쓰므로
-    target.distance_km 등 추가 피처 없이 pace만 쓰는 단순 형태로 구성)."""
+    과거 세션의 pace만 뽑는 단순 형태로 구성, 타깃 세션 값은 쓰지 않음)."""
     samples = []
     n = len(user_df)
     for start in range(0, n - N_PAST_SESSIONS):

@@ -35,12 +35,12 @@
 - start_time: 체인의 첫 세션 start_time
 - duration_sec: (마지막 세션의 start_time+duration_sec) - 첫 세션의 start_time
   (중간의 "끊긴 시간"도 실제로 흐른 시간이므로 duration에 포함)
-- distance_km: 체인에 속한 세션들의 distance_km 합산 (서로 겹치지 않는 구간이므로
-  단순 합산이 타당)
+- actual_distance_km: 체인에 속한 세션들의 actual_distance_km 합산 (서로
+  겹치지 않는 구간이므로 단순 합산이 타당)
 - avg_heart_rate: duration_sec으로 가중평균 (raw 심박 배열은 1단계 이후 버렸기
   때문에, 가진 정보(세션별 평균 심박 + 세션별 길이)로 재구성할 수 있는 가장
   합리적인 근사치. 세션 길이가 비슷하면 단순평균과 거의 같아진다.)
-- avg_pace_sec_per_km: duration_sec / distance_km (반드시 합산된 총량으로
+- avg_pace_sec_per_km: duration_sec / actual_distance_km (반드시 합산된 총량으로
   다시 계산 — 개별 페이스를 평균 내면 안 됨, 페이스는 거리/시간에 대해
   비선형이라 평균의 평균이 실제 페이스와 다르다.)
 """
@@ -148,7 +148,7 @@ def merge_chain(chain_rows):
     first = chain_rows[0]
     last = chain_rows[-1]
 
-    total_distance_km = sum(r["distance_km"] for r in chain_rows)
+    total_distance_km = sum(r["actual_distance_km"] for r in chain_rows)
     merged_duration_sec = (last["start_time"] + last["duration_sec"]) - first["start_time"]
     total_duration_for_hr = sum(r["duration_sec"] for r in chain_rows)
     weighted_hr = sum(r["avg_heart_rate"] * r["duration_sec"] for r in chain_rows) / total_duration_for_hr
@@ -157,7 +157,7 @@ def merge_chain(chain_rows):
         "user_id": first["user_id"],
         "session_id": first["session_id"],
         "start_time": first["start_time"],
-        "distance_km": total_distance_km,
+        "actual_distance_km": total_distance_km,
         "duration_sec": merged_duration_sec,
         "avg_pace_sec_per_km": merged_duration_sec / total_distance_km,
         "avg_heart_rate": weighted_hr,
@@ -219,7 +219,7 @@ def main():
     if example is not None:
         print(f"[예시] user_id={example['user_id']}, {example['merged_count']}개 세션이 하나로 병합됨 "
               f"(원본 session_id: {example['merged_session_ids']})")
-        print(f"  합산 거리={example['distance_km']:.3f}km, 합산 시간={example['duration_sec']:.0f}초, "
+        print(f"  합산 거리={example['actual_distance_km']:.3f}km, 합산 시간={example['duration_sec']:.0f}초, "
               f"재계산 페이스={example['avg_pace_sec_per_km']:.3f}초/km, 가중평균 심박={example['avg_heart_rate']:.1f}")
     print("-" * 60)
     print(f"저장 위치: {MERGED_OUTPUT_PATH.resolve()}")

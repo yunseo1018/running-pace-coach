@@ -62,3 +62,110 @@
 `weather`, `temperature`, `humidity` 등 날씨 관련 필드도 전체 파일 스캔
 결과 존재하지 않음을 이미 확인했다 (1주차에 확인, 이번 주 재확인 결과 동일).
 입력/타깃 정의에서 계속 제외한다.
+
+## 5. 재현 방법 (실제로 실행한 명령과 결과 전문)
+
+누구나 저장소 루트(`endomondoHR.json`이 있는 폴더)에서 아래 명령을 그대로
+실행해 위 결론을 재현할 수 있다. (Git Bash 기준. 전체 6.12GB 파일을 한 번에
+메모리에 올리지 않는 스트리밍 방식 — `grep`은 라인 단위로 처리한다.)
+
+### 5-1. 전체 필드(키) 목록 전수 추출
+
+```bash
+grep -oE "'[a-zA-Z_]+':" endomondoHR.json | sort -u
+```
+
+실행 결과 (11개 전부):
+```
+'altitude':
+'gender':
+'heart_rate':
+'id':
+'latitude':
+'longitude':
+'speed':
+'sport':
+'timestamp':
+'url':
+'userId':
+```
+
+### 5-2. 계획/목표 거리 관련 키워드 존재 여부 (대소문자 무관, 전체 파일)
+
+```bash
+for kw in plan goal target distance duration; do
+  cnt=$(grep -ci "$kw" endomondoHR.json)
+  echo "$kw: $cnt"
+done
+```
+
+실행 결과:
+```
+plan: 0
+goal: 0
+target: 0
+distance: 0
+duration: 0
+```
+
+### 5-3. 날씨 관련 키워드 존재 여부 (재확인)
+
+```bash
+for kw in weather temperature humidity; do
+  cnt=$(grep -ci "$kw" endomondoHR.json)
+  echo "$kw: $cnt"
+done
+```
+
+실행 결과:
+```
+weather: 0
+temperature: 0
+humidity: 0
+```
+
+### 5-4. 샘플 레코드 1건의 필드별 값/타입 확인
+
+```bash
+python -c "
+import ast
+with open('endomondoHR.json', 'r', encoding='utf-8') as f:
+    line = f.readline()
+rec = ast.literal_eval(line)
+for k, v in rec.items():
+    if isinstance(v, list):
+        print(f'{k}: list(len={len(v)}), sample={v[:3]}')
+    else:
+        print(f'{k}: {v!r}')
+"
+```
+
+실행 결과:
+```
+speed: list(len=500), sample=[6.8652, 16.4736, 19.1988]
+altitude: list(len=500), sample=[41.6, 40.6, 40.6]
+gender: 'male'
+heart_rate: list(len=500), sample=[100, 111, 120]
+id: 396826535
+url: 'https://www.endomondo.com/users/10921915/workouts/396826535'
+userId: 10921915
+timestamp: list(len=500), sample=[1408898746, 1408898754, 1408898765]
+longitude: list(len=500), sample=[24.64977040886879, 24.65014273300767, 24.650910682976246]
+latitude: list(len=500), sample=[60.173348765820265, 60.173239801079035, 60.17298021353781]
+sport: 'bike'
+```
+
+**참고**: `endomondoHR.json`은 유효한 JSON이 아니라 한 줄에 파이썬 dict
+리터럴(싱글쿼트)이 하나씩 있는 형식이라, `json.load()`가 아니라
+`ast.literal_eval()`로 한 줄씩 읽어야 한다 (`01_parse_run_sessions.py` 참고).
+위 5-1, 5-2, 5-3의 `grep` 명령은 파싱 없이 텍스트 패턴만 찾는 것이라
+이 형식 문제와 무관하게 전체 파일에 대해 정확히 동작한다.
+
+## 6. 알려진 한계
+
+- `distance_km` → `actual_distance_km` 컬럼명 리네임(`11_migrate_rename_distance_column.py`)
+  후 01단계(`01_parse_run_sessions.py`)의 동작 검증은 원본 6.12GB 파일 전체가
+  아니라 **앞부분 1만 줄 샘플**로만 스모크 테스트했다. 6GB 전체를 01단계로
+  다시 돌려서 끝까지 확인한 것은 아니며(캐시된 pkl은 마이그레이션 스크립트로
+  컬럼명만 바꾼 것), 1만 줄 밖의 구간에서 예기치 못한 스키마 차이가 있다면
+  아직 발견되지 않았을 수 있다.

@@ -141,7 +141,7 @@ def build_session_row(record, stats):
         "user_id": record["userId"],
         "session_id": record["id"],
         "start_time": timestamps[0],
-        "distance_km": distance_km,
+        "actual_distance_km": distance_km,
         "duration_sec": duration_sec,
         "avg_pace_sec_per_km": avg_pace_sec_per_km,
         "avg_heart_rate": avg_heart_rate,
@@ -197,7 +197,7 @@ def main():
     print(f"고유 사용자 수: {df['user_id'].nunique()}")
     print("-" * 60)
     print("컬럼 통계 (describe):")
-    print(df[["distance_km", "duration_sec", "avg_pace_sec_per_km", "avg_heart_rate"]].describe())
+    print(df[["actual_distance_km", "duration_sec", "avg_pace_sec_per_km", "avg_heart_rate"]].describe())
     print("-" * 60)
     print("상위 5개 행 샘플:")
     print(df.head())
