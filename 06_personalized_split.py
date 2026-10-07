@@ -6,7 +6,7 @@ CLAUDE.md 배경: 기존 cold-start(user-disjoint 80/20, 03단계) 분할은
 "처음 보는 사용자에게 얼마나 잘 일반화되는지"만 측정한다. 이 프로젝트의 실제
 목표("한 사용자의 기록이 쌓일수록 코칭이 정교해지는지")를 측정하려면, 같은
 사용자 안에서 "과거 기록(history)"과 "그 다음에 온 세션(temporal hold-out)"을
-나눠야 한다. 그래서 전체 748명 사용자를 전부 사용하되(= 03단계의 사용자
+나눠야 한다. 그래서 메인 데이터의 eligible 사용자를 전부 사용하되(= 03단계의 사용자
 단위 train/test 분할과는 무관하게), 각 사용자의 (과거5 -> 타겟) 윈도우들을
 타겟 세션이 "그 사용자 안에서 몇 번째로 나온 윈도우인지" 기준으로
 앞부분 80%는 history(=personalized train), 뒷부분 20%는 temporal
@@ -38,19 +38,15 @@ personalized_test_dataset.pkl(=뒷부분 temporal hold-out)의 정보는 같은
 (main()의 "시간 역전 없음" 검증 참고).
 """
 
-import io
-import sys
-from pathlib import Path
-
 import pandas as pd
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+import config
 
-INPUT_PATH = Path("data") / "user_sequences.pkl"
-TRAIN_OUTPUT_PATH = Path("data") / "personalized_train_dataset.pkl"
-TEST_OUTPUT_PATH = Path("data") / "personalized_test_dataset.pkl"
+INPUT_PATH = config.USER_SEQUENCES_PATH
+TRAIN_OUTPUT_PATH = config.PERSONALIZED_TRAIN_DATASET_PATH
+TEST_OUTPUT_PATH = config.PERSONALIZED_TEST_DATASET_PATH
 
-N_PAST_SESSIONS = 5
+N_PAST_SESSIONS = config.N_PAST_SESSIONS
 PAST_FEATURE_COLUMNS = ["actual_distance_km", "avg_pace_sec_per_km", "avg_heart_rate"]
 TARGET_COLUMN = "avg_pace_sec_per_km"
 
@@ -94,6 +90,10 @@ def build_windows_for_user(user_df):
                 "y": target_row[TARGET_COLUMN],
                 "last_input_session_time": last_input_session_time,
                 "target_start_time": target_start_time,
+                "target_merged_count": int(target_row["merged_count"]),
+                "target_actual_distance_km": float(target_row["actual_distance_km"]),
+                "past_merged_counts": past_window["merged_count"].astype(int).tolist(),
+                "target_session_id": int(target_row["session_id"]),
             }
         )
     return samples, n_audit_excluded
@@ -116,6 +116,7 @@ def split_history_and_holdout(user_windows):
 
 def main():
     df = pd.read_pickle(INPUT_PATH)
+    print(f"[입력 확인] user_sequences: {INPUT_PATH} (세션 {len(df)}건, 사용자 {df['user_id'].nunique()}명)")
 
     personalized_train = []
     personalized_test = []

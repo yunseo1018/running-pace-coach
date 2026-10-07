@@ -1,52 +1,39 @@
 # -*- coding: utf-8 -*-
 """
-2단계: 1단계에서 만든 run 세션 표를 사용자별로 시간순 정렬하고,
-과거 5개 + 예측 대상 1개 = 최소 6개 세션이 안 나오는 사용자는 제외한다.
+2단계 (v3, 10월 2주차 5번 재배선): 메인 데이터(중복제거->병합 완료)를
+사용자별로 시간순 정렬하고, 과거 5개 + 예측 대상 1개 = 최소 6개 세션이
+안 나오는 사용자는 제외한다.
 
 CLAUDE.md 규칙: N=5로 고정, 세션이 6개 미만인 사용자는 데이터셋에서 제외.
+
+재배선: INPUT_PATH를 하드코딩하지 않고 config.py의 MAIN_DATA_PATH를
+그대로 쓴다 (01단계 run_sessions.pkl이 아니라 중복제거->병합이 끝난
+run_sessions_deduped_merged.pkl). config.load_main_sessions()가 파일명/
+세션수/사용자수를 출력하고 세션 수가 105,709가 아니면 즉시 중단한다.
 """
 
-import io
-import sys
 from pathlib import Path
 
-import pandas as pd
+import config
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-
-INPUT_PATH = Path("data") / "run_sessions.pkl"
-OUTPUT_PATH = Path("data") / "user_sequences.pkl"
-
-MIN_SESSIONS_REQUIRED = 6  # 과거 5개 + 예측 대상 1개
+OUTPUT_PATH = config.USER_SEQUENCES_PATH
 
 
 def main():
-    df = pd.read_pickle(INPUT_PATH)
+    df = config.load_main_sessions()
 
     n_users_before = df["user_id"].nunique()
 
-    # 사용자별로 start_time(세션 시작 시각) 기준 시간순 정렬.
-    # 같은 사용자의 세션들이 실제로 시간 순서대로 이어지도록 하는 것이 목적이며,
-    # 이후 3~4단계의 "과거 5개 → 다음 세션" 구성이 이 순서에 의존한다.
-    df = df.sort_values(["user_id", "start_time"]).reset_index(drop=True)
+    df_eligible, eligible_ids = config.build_eligible_sequences(df)
 
-    # 사용자 내에서 몇 번째 세션인지 순번을 매긴다 (0부터 시작).
-    # 나중에 슬라이딩 윈도우를 만들 때 "연속된 세션인지"를 이 순번으로 확인한다.
-    df["session_order"] = df.groupby("user_id").cumcount()
-
-    # 세션 수 계산 후, 6개 미만인 사용자를 제외.
-    session_counts = df.groupby("user_id").size()
-    eligible_user_ids = session_counts[session_counts >= MIN_SESSIONS_REQUIRED].index
-    df_eligible = df[df["user_id"].isin(eligible_user_ids)].reset_index(drop=True)
-
-    n_users_after = df_eligible["user_id"].nunique()
+    n_users_after = len(eligible_ids)
 
     df_eligible.to_pickle(OUTPUT_PATH)
 
     print("=" * 60)
     print(f"필터 전 사용자 수: {n_users_before}")
     print(f"6세션 미만으로 제외된 사용자 수: {n_users_before - n_users_after}")
-    print(f"필터 후 사용자 수 (run 세션 {MIN_SESSIONS_REQUIRED}개 이상): {n_users_after}")
+    print(f"필터 후 사용자 수 (run 세션 {config.MIN_SESSIONS_REQUIRED}개 이상): {n_users_after}")
     print(f"필터 후 세션 수: {len(df_eligible)}")
     print("-" * 60)
 
