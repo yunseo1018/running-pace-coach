@@ -18,23 +18,30 @@ MAE를 보고 조정하지 않음) ===
     (max(start) < min(end) — 그냥 시작이 가깝다고 다 중복은 아니고,
     실제로 같은 시간대를 차지해야 "중복 기록"이라 할 수 있으므로 추가)
 
-=== 2. 어느 쪽을 남길지 규칙 ===
+=== 2. 어느 쪽을 남길지 규칙 (v2, 채택 — "의미" 기준으로 선택) ===
 같은 중복 클러스터(2개 이상이 서로 중복 관계로 묶인 그룹) 안에서:
 1순위: GPS 포인트 개수(session_point_counts.pkl, timestamp 배열 길이)가
        더 많은 쪽을 남긴다 — 포인트가 많을수록 더 상세하게 기록된 트랙이라고
        보는 것이 합리적 (기기/신호 문제로 샘플링이 거칠게 끊긴 쪽보다 낫다).
-2순위(동률): start_time이 더 빠른 쪽을 남긴다 (임의지만 일관된 재현 가능한
-       규칙 필요 — 특별한 의미는 없음, 그냥 결정적 tie-break).
+2순위(동률): **duration_sec이 더 긴 쪽**을 남긴다. 중복 쌍의 상당수가
+       "같은 운동을 두 기록이 서로 다른 길이로 담아낸 경우"로 보이므로
+       (docs/target_pace_definition.md 6번 참고), 더 길게/완전하게
+       기록된 쪽이 그 운동을 더 온전히 담았다고 보는 것이 의미상
+       타당하다고 판단해 이 규칙을 선택했다. (이전 버전은 start_time이
+       빠른 쪽을 썼는데, duration을 전혀 보지 않아 "더 짧게 끝난 기록"이
+       남는 경우가 있었다 — 동률 쌍 2,687건 중 206건에서 결과가 달라짐.
+       MAE/RMSE에 대한 영향은 0.0004~0.0074로 거의 없음을 확인했으나,
+       이건 규칙을 고른 "이유"가 아니라 "성능을 해치지 않는다"는 부수적
+       확인일 뿐이다 — 선택 기준은 끝까지 "의미"였다.)
 3순위(1,2순위 모두 동률): session_id가 더 작은 쪽을 남긴다. 이 역시
-       특별한 의미는 없는 순수 결정적 tie-break다. **중요**: 처음
-       작성했을 때는 이 3순위가 없었고, 1·2순위가 모두 동률일 때
-       Python `set`의 내부(해시 기반) 순회 순서로 결정됐다 — 실제로
-       확인해보니 전체 제거 2,687건 중 **2,268건(84.4%)**이 이 동률
-       케이스였다 (진짜 중복이면 포인트 수와 시작 시각도 거의 항상
-       같기 때문). 즉 1·2순위만으로는 대부분의 경우 "의미 없는 임의
-       순서"로 결정되고 있었던 것이다. session_id를 3순위로 추가해
-       최소한 "결정적이고 재현 가능한" 규칙으로 바로잡았다
-       (docs/duplicate_audit.md "3. 동점 처리" 참고).
+       특별한 의미는 없는 순수 결정적 tie-break다. **참고**: 맨 처음
+       작성했던 버전(2순위=start_time)에서는 이 3순위가 없었고, 1·2순위가
+       모두 동률일 때 Python `set`의 내부(해시 기반) 순회 순서로
+       결정됐다 — 실제로 확인해보니 전체 제거 2,687건 중 **2,268건
+       (84.4%)**이 그 동률 케이스였다. session_id를 3순위로 추가해
+       "결정적이고 재현 가능한" 규칙으로 바로잡았다
+       (docs/duplicate_audit.md "3. 동점 처리" 참고 — 그 문서는 구버전
+       (2순위=start_time) 기준으로 작성되어 있다).
 """
 
 import ast
@@ -193,17 +200,24 @@ def main():
     correspondence_rows = []
     removed_ids = set()
     for root, members in clusters.items():
-        # 2. 어느 쪽을 남길지: 포인트 개수 내림차순 -> start_time 오름차순 ->
-        #    session_id 오름차순(1·2순위 모두 동률일 때의 결정적 tie-break).
+        # 2. 어느 쪽을 남길지 (v2, 채택): 포인트 개수 내림차순 -> duration_sec
+        #    내림차순(더 길게 기록된 쪽 우선) -> session_id 오름차순(그래도
+        #    동률이면 결정적 tie-break). "의미" 기준으로 골랐다: 중복 쌍은
+        #    대개 같은 운동을 두 기록이 서로 다른 길이로 담아낸 경우라
+        #    (docs/target_pace_definition.md 6번 참고), 더 길게/완전하게
+        #    기록된 쪽을 남기는 것이 "그 운동을 더 온전히 담은 기록을
+        #    남긴다"는 의미에서 더 타당하다. MAE/RMSE에 미치는 영향은
+        #    거의 없음(0.0004~0.0074)을 확인했지만, 그건 이 규칙을 고른
+        #    이유가 아니라 "성능을 해치지 않는다"는 부수적 확인일 뿐이다.
         members_sorted = sorted(
-            members, key=lambda sid: (-point_count_lookup.get(sid, 0), start_time_lookup[sid], sid)
+            members, key=lambda sid: (-point_count_lookup.get(sid, 0), -duration_lookup[sid], sid)
         )
         kept = members_sorted[0]
         for removed in members_sorted[1:]:
             removed_ids.add(removed)
             if (
                 point_count_lookup.get(kept) == point_count_lookup.get(removed)
-                and start_time_lookup[kept] == start_time_lookup[removed]
+                and duration_lookup[kept] == duration_lookup[removed]
             ):
                 n_tied_on_points_and_time += 1
 
@@ -253,7 +267,7 @@ def main():
     print(f"[1] 중복 클러스터 수(2개 이상 묶인 그룹): {len(clusters)}개, "
           f"제거 대상 세션 수: {len(removed_ids)}개")
     print(f"    대응표 -> {DEDUP_CORRESPONDENCE_PATH}")
-    print(f"[3] n_points와 start_time이 모두 동률이라 session_id(3순위)로 결정된 쌍: "
+    print(f"[3] n_points와 duration_sec이 모두 동률이라 session_id(3순위)로 결정된 쌍: "
           f"{n_tied_on_points_and_time} / {len(removed_ids)} "
           f"({n_tied_on_points_and_time / len(removed_ids):.1%})")
     print(f"[2] 거리차 0.5km 초과 또는 시간차 300초 초과로 '큰 차이' 플래그 걸린 쌍(전체): "

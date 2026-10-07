@@ -101,6 +101,7 @@ def merge_chain(chain_rows):
         "avg_heart_rate": weighted_hr,
         "gender": first["gender"],
         "merged_count": len(chain_rows),
+        "merged_session_ids": [r["session_id"] for r in chain_rows],
     }
 
 
