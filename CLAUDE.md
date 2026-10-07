@@ -6,6 +6,8 @@
 
 9월 4주차~10월 1주차 작업(데이터 파이프라인, baseline 5종, cold-start/personalized 평가 이원화, 세션 병합 1차 검토)은 커밋됨. **10월 2주차는 먼저 "입력이 예측 시점에 실제로 존재하는가"를 확정하고 평가 기준을 고정한 뒤, 그 기준 위에서 모델 비교를 확장하는 주다.**
 
+**6단계(Ridge) 결과**: Ridge는 MAE에서 median-5를 유의하게 못 이김, RMSE는 상위 baseline과 구분 안 됨, LSTM은 보류 (`docs/ridge_results.md` 참고).
+
 10월 2주차 작업 순서 (반드시 이 순서, 건너뛰지 않는다):
 1. 원본 필드 출처 확인, 거리 컬럼 분리(planned/actual), 메인 태스크를 "과거 기록만 입력"으로 복원
 2. 과거 정보만 썼는지 감사(last_input_session_time 검증) 및 baseline 재실행
