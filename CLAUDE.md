@@ -10,6 +10,8 @@
 
 **7단계(트리) 결과**: 확장 피처 + 직접 구현 GBM(gbt_lib, absolute_error/median5+잔차)이 cold-start·personalized 둘 다 median-5를 MAE 신뢰구간 밖에서 유의하게 이김(절대 개선폭 2.6~2.8초/km, median-5 대비 4~5%; RMSE는 구분 안 됨). sklearn.tree가 이 환경에서 차단되어(HistGradientBoosting 등 전부 실패) sklearn은 쓰지 않고 `gbt_lib.py`로 직접 구현해 사용함. CV기준 선택 모델과 테스트 1위 모델이 split마다 다르지만(cold-start=absolute_error, personalized=median5+잔차) 둘 다 median-5를 이겨 결론은 바뀌지 않음 (`docs/tree_results.md` 참고).
 
+**8단계(MLP) 결과**: MLP는 GBM과 MAE 동률, median-5 대비 유의한 개선, RMSE 해석은 상위 1% 윈도우에 좌우 (`docs/mlp_results.md` 참고).
+
 10월 2주차 작업 순서 (반드시 이 순서, 건너뛰지 않는다):
 1. 원본 필드 출처 확인, 거리 컬럼 분리(planned/actual), 메인 태스크를 "과거 기록만 입력"으로 복원
 2. 과거 정보만 썼는지 감사(last_input_session_time 검증) 및 baseline 재실행
