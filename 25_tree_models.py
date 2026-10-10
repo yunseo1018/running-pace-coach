@@ -240,45 +240,52 @@ def main():
     from sklearn.pipeline import Pipeline
     from sklearn.model_selection import GroupKFold as SkGroupKFold
 
-    md.append("### 0-1. 추가 발견: sklearn.tree 차단 -> gbt_lib.py로 직접 구현\n")
+    md.append("### 0-1. 추가 발견: sklearn.tree 차단(간헐적) -> gbt_lib.py로 직접 구현 고정 사용\n")
     try:
         from sklearn.ensemble import HistGradientBoostingRegressor as _ProbeHGB
-        sklearn_tree_ok = True
-        md.append("- `from sklearn.ensemble import HistGradientBoostingRegressor` 성공 — "
-                  "sklearn 버전을 그대로 쓴다 (아래 gbt_lib 경로는 사용하지 않음).\n")
+        sklearn_tree_importable_this_run = True
+        md.append("- 이번 실행에서 `from sklearn.ensemble import HistGradientBoostingRegressor` "
+                  "**성공**.\n")
     except Exception as e:
-        sklearn_tree_ok = False
-        md.append(f"- `from sklearn.ensemble import HistGradientBoostingRegressor` 실패: "
-                  f"`{type(e).__name__}: {str(e)[:200]}` (3회 재시도 동일하게 실패했음을 "
-                  f"이 작업 시작 시 별도로 확인함). DecisionTree/RandomForest/GradientBoosting도 "
-                  f"같은 이유로 전부 실패. lightgbm/xgboost는 미설치·설치 금지. "
-                  f"-> **gbt_lib.py(numpy 직접구현)로 대체, 사용자 확인받음.**\n")
-        print("[0-1] sklearn.tree 차단 확인 - gbt_lib.py 경로 사용")
-        gbt_check = gl._validate_gbt_sanity()
-        for loss, r in gbt_check["loss_results"].items():
-            md.append(f"  - gbt_lib 자체 검증({loss}): 학습손실 {r['first_loss']:.3f} -> "
-                      f"{r['last_loss']:.3f}, 반복마다 단조감소={r['monotonic_decrease']} "
-                      f"(최대 증가분 {r['max_increase']:.2e})\n")
-        md.append(f"  - 계단함수 합성데이터 분할 검증: 올바른 feature 선택={gbt_check['split_feature_correct']}, "
-                  f"분할 임계값={gbt_check['split_threshold_value']:.4f} (실제 경계 0.5 근처(±0.1)="
-                  f"{gbt_check['split_near_boundary']})\n")
-        md.append("  - sklearn.tree가 막혀 sklearn HistGradientBoostingRegressor와 직접 수치 대조는 "
-                  "**못 했다(불가능)** — 위 자체 정합성 검증만으로 대체했다. ridge_lib.py의 "
-                  "alpha=0 vs OLS 같은 방식의 '정답 대조'는 아니므로 이 한계를 명시한다.\n\n")
-        print(f"  gbt_lib 검증: {gbt_check}")
+        sklearn_tree_importable_this_run = False
+        md.append(f"- 이번 실행에서 `from sklearn.ensemble import HistGradientBoostingRegressor` "
+                  f"**실패**: `{type(e).__name__}: {str(e)[:200]}`\n")
+    md.append("- **중요(간헐적 현상 발견)**: sklearn.tree의 import 성공 여부가 **실행마다 달라진다** "
+              "— 처음 발견했을 때는 3회 재시도 모두 실패했고(DecisionTree/RandomForest/"
+              "GradientBoosting/HistGradientBoosting 전부), 이번 보완 작업 중 재확인하니 성공하는 "
+              "경우도 나왔다(원인 미확인 — Windows Application Control Policy의 캐시/타이밍 문제로 "
+              "추정하나 검증 안 함). lightgbm/xgboost는 여전히 미설치·설치 금지.\n")
+    md.append("- **그래서 이번 실행의 import 성공 여부와 무관하게, 코드가 항상 `gbt_lib.py`"
+              "(numpy 직접구현)를 쓰도록 고정했다** — 사용자 확인을 받고 이미 커밋된(690b93f) "
+              "방식을 그대로 유지해 실행마다 결과가 달라지는 것을 막는다(실제로 이 고정을 하기 "
+              "전, sklearn이 우연히 import된 회차에서 real sklearn HistGradientBoostingRegressor가 "
+              "조용히 쓰여 수치가 미세하게 달라지는 재현성 문제를 직접 겪었다).\n")
+    print(f"[0-1] 이번 실행 sklearn.tree import 성공={sklearn_tree_importable_this_run} "
+          f"(결과와 무관하게 gbt_lib.py 고정 사용)")
 
-    if sklearn_tree_ok:
-        def make_gbt(params, loss):
-            return _ProbeHGB(loss=loss, random_state=CV_SEED, **params)
-    else:
-        def make_gbt(params, loss):
-            return build_gbt(params, loss)
+    gbt_check = gl._validate_gbt_sanity()
+    for loss, r in gbt_check["loss_results"].items():
+        md.append(f"  - gbt_lib 자체 검증({loss}): 학습손실 {r['first_loss']:.3f} -> "
+                  f"{r['last_loss']:.3f}, 반복마다 단조감소={r['monotonic_decrease']} "
+                  f"(최대 증가분 {r['max_increase']:.2e})\n")
+    md.append(f"  - 계단함수 합성데이터 분할 검증: 올바른 feature 선택={gbt_check['split_feature_correct']}, "
+              f"분할 임계값={gbt_check['split_threshold_value']:.4f} (실제 경계 0.5 근처(±0.1)="
+              f"{gbt_check['split_near_boundary']})\n")
+    md.append("  - sklearn.tree가 (이번 실행에서 성공했더라도) 자체 검증만으로 정합성을 판단한다 "
+              "— gbt_lib을 고정 사용하기로 했으므로 sklearn과의 수치 대조는 하지 않는다. "
+              "ridge_lib.py의 alpha=0 vs OLS 같은 방식의 '정답 대조'는 아니므로 이 한계를 명시한다.\n\n")
+    print(f"  gbt_lib 검증: {gbt_check}")
+
+    def make_gbt(params, loss):
+        return build_gbt(params, loss)
 
     md.append("### 0-2. 모델명 표기 정정\n")
     md.append("이전 보고서/CLAUDE.md에서 'HGB'라고 썼던 표기를 전부 **'직접 구현 GBM(gbt_lib)'**으로 "
-              "고친다 — sklearn의 HistGradientBoostingRegressor는 이 환경에서 한 번도 실행되지 "
-              "않았고(0-1 참고), 전부 `gbt_lib.SimpleGradientBoostingRegressor`(numpy 직접구현) "
-              "결과다. sklearn 구현과 다를 수 있는 점(코드 기준 확인):\n")
+              "고친다 — sklearn.tree의 import 성공 여부가 실행마다 달라지는 것과 무관하게(0-1 참고), "
+              "이 보고서의 모델 선택/학습 코드가 항상 `gbt_lib.py`를 쓰도록 고정되어 있어 "
+              "**sklearn의 HistGradientBoostingRegressor는 숫자 생성에 한 번도 쓰이지 않았다.** "
+              "전부 `gbt_lib.SimpleGradientBoostingRegressor`(numpy 직접구현) 결과다. sklearn "
+              "구현과 다를 수 있는 점(코드 기준 확인):\n")
     md.append("- **분할 탐색**: `gbt_lib.py` 204행 `g = np.sign(residual) if loss==\"absolute_error\" "
               "else residual` — absolute_error에서는 **부호(sign)만 있는 pseudo-residual**로 분할 "
               "지점을 고른다(제곱오차 감소량 기준).\n")
@@ -409,7 +416,7 @@ def main():
 
     # ===== 2(b). HistGradientBoostingRegressor (absolute_error 메인 / squared_error 참고) =====
     print("\nHGB(absolute_error) 하이퍼파라미터 선택 중...")
-    md.append(f"### (b) {'HistGradientBoostingRegressor(sklearn)' if sklearn_tree_ok else 'gbt_lib.SimpleGradientBoostingRegressor(numpy 직접구현)'}\n")
+    md.append("### (b) gbt_lib.SimpleGradientBoostingRegressor(numpy 직접구현, 고정 사용 — 0-1 참고)\n")
     md.append(f"- 격자(사전 고정, 결과 보고 안 바꿈): learning_rate∈[0.03,0.1], "
               f"max_iter∈[100,300], max_depth∈[2,3] (총 {len(HGB_PARAM_GRID)}개 조합), "
               f"min_samples_leaf={GBT_MIN_SAMPLES_LEAF} 고정, n_bins={GBT_N_BINS} 고정.\n")
@@ -616,15 +623,16 @@ def main():
         md.append(f"\n#### {split_name}\n")
         md.append(m21.df_to_markdown(pd.DataFrame(rows)))
         md.append(f"\n- **CV/내부검증 기준 선택(주 결과)**: `{ALL_LABELS[cv_best]}`\n")
-        md.append(f"- **테스트 기준 최고(참고)**: `{ALL_LABELS[test_best]}`"
-                  f"{' (CV기준과 동일)' if cv_best == test_best else ' (**CV기준과 다름 — 둘 다 아래에 표시**)'}\n")
-        print(f"  {split_name}: CV선택(주결과)={cv_best}, 테스트최고(참고)={test_best}")
+        md.append(f"- **테스트 기준 최고**: `{ALL_LABELS[test_best]}`"
+                  f"{' (CV기준과 동일)' if cv_best == test_best else ' (**CV기준과 다름 — 사후에 테스트 점수로 골랐다면 이 모델을 선택했을 것이다. 아래에 낙관적 편향 예시로만 같이 표시**)'}\n")
+        print(f"  {split_name}: CV선택(주결과)={cv_best}, 테스트최고(낙관적편향예시)={test_best}")
 
-    md.append("\n### 쌍체 차이 95% CI (주 결과: CV기준 선택 모델, 참고: 테스트기준 최고 모델 — 다르면 둘 다)\n")
+    md.append("\n### 쌍체 차이 95% CI (주 결과: CV기준 선택 모델. 테스트기준 최고 모델이 다르면 "
+              "'낙관적 편향 예시'로만 같이 표시 — 메인 결론에는 포함하지 않음)\n")
     for split_name in ["cold-start", "personalized"]:
         boot_mae, boot_rmse = boot_results[split_name]
         for rank, model_name in enumerate(report_models_per_split[split_name]):
-            role = "주 결과(CV 선택)" if rank == 0 else "참고(테스트 최고, CV기준과 다름)"
+            role = "주 결과(CV 선택)" if rank == 0 else "낙관적 편향 예시(테스트 1위, 사후 선택 시 나타났을 수치 — 메인 아님)"
             md.append(f"\n#### {split_name} — {role}: {ALL_LABELS[model_name]}\n")
             mae_diff = boot_mae["median5"] - boot_mae[model_name]
             mae_lo, mae_hi = np.percentile(mae_diff, [2.5, 97.5])
@@ -891,9 +899,18 @@ def main():
                 out[idx] = rng.permutation(values[idx])
         return out
 
-    md.append("\n### (a) 라벨 셔플 테스트 (cold-start, 5개 시드)\n")
+    md.append("\n### (a) 라벨 셔플 테스트 (cold-start, 5개 시드) — 보강판\n")
     median5_test_mae_check = np.mean(np.abs(y_te - median5_from_X(X_te)))
-    md.append(f"median-5 test MAE(기준값) = {median5_test_mae_check:.3f}\n")
+    real_gbm_abs_mae = float(np.mean(np.abs(y_te - hgb_cold_pred)))
+    real_resid_mae = float(np.mean(np.abs(y_te - resid_cold_pred)))
+    md.append(f"**기준값(실제 데이터로 학습한 진짜 모델) 대조**: median-5 test MAE={median5_test_mae_check:.3f}, "
+              f"실제 GBM_abs test MAE={real_gbm_abs_mae:.3f}(개선폭 {median5_test_mae_check-real_gbm_abs_mae:.3f}), "
+              f"실제 median5+잔차 GBM test MAE={real_resid_mae:.3f}(개선폭 {median5_test_mae_check-real_resid_mae:.3f}). "
+              f"아래 셔플 결과는 이 진짜 개선폭과 비교해서 읽는다.\n")
+    md.append("**주의**: 사용자 내부 셔플은 그 사용자의 다른 세션끼리만 타깃을 바꾸는 것이라, "
+              "'이 사용자는 대체로 이런 페이스다'라는 사용자 수준 정보는 섞어도 남는다 — "
+              "그래서 **순수한 귀무가설 검정(null test)이 아닐 수 있다.** 사용자 정보까지 없애는 "
+              "전체 셔플(통제실험)을 함께 봐야 한다.\n")
 
     within_rows = []
     for seed in range(5):
@@ -901,9 +918,11 @@ def main():
         y_shuf = _shuffle_within_user(y_tr, uid_tr, rng_s)
         m_shuf = make_gbt(cold_hgb_params, "absolute_error").fit(X_tr, y_shuf)
         mae_shuf = float(np.mean(np.abs(y_te - m_shuf.predict(X_te))))
-        within_rows.append({"시드": seed, "GBM_abs, y 사용자내 셔플 후 test MAE": mae_shuf,
-                             "median5 대비": mae_shuf - median5_test_mae_check})
-    md.append("- **GBM_abs(직접구현), y를 사용자 내부에서 셔플 후 재학습**:\n")
+        within_rows.append({"시드": seed, "median-5(기준)": median5_test_mae_check,
+                             "실제 GBM_abs": real_gbm_abs_mae,
+                             "GBM_abs, y 사용자내 셔플 후 test MAE": mae_shuf,
+                             "셔플-median5": mae_shuf - median5_test_mae_check})
+    md.append("- **GBM_abs(직접구현), y를 사용자 내부에서 셔플 후 재학습** (median-5·실제 모델과 나란히):\n")
     md.append(m21.df_to_markdown(pd.DataFrame(within_rows)))
 
     global_rows = []
@@ -914,8 +933,11 @@ def main():
         mae_shuf_g = float(np.mean(np.abs(y_te - m_shuf_g.predict(X_te))))
         global_rows.append({"시드": seed, "GBM_abs, y 전체 셔플(통제실험) 후 test MAE": mae_shuf_g,
                              "median5 대비": mae_shuf_g - median5_test_mae_check})
-    md.append("\n- **통제 실험: y를 사용자 구분 없이 전체 셔플(순수 노이즈)**:\n")
+    md.append("\n- **통제 실험(b): y를 사용자 구분 없이 전체 셔플(순수 노이즈)**:\n")
     md.append(m21.df_to_markdown(pd.DataFrame(global_rows)))
+    global_beats_abs = all(r["median5 대비"] < 0 for r in global_rows)
+    md.append(f"\n  -> 전체 셔플에서 median-5 대비 개선이 유의하게 보이는가 = "
+              f"**{'예 — 중단 필요' if global_beats_abs else '아니오(전부 median-5보다 나쁨, 정상)'}**\n")
 
     med_resid_rows = []
     med5_tr_check = median5_from_X(X_tr)
@@ -928,30 +950,54 @@ def main():
         m_resid_shuf.fit(X_tr, resid_shuf)
         pred_resid_shuf = med5_te_check + m_resid_shuf.predict(X_te)
         mae_resid_shuf = float(np.mean(np.abs(y_te - pred_resid_shuf)))
-        med_resid_rows.append({"시드": seed, "median5+잔차, 잔차 사용자내 셔플 후 test MAE": mae_resid_shuf,
-                                "median5 대비": mae_resid_shuf - median5_test_mae_check})
-    md.append("\n- **median5+잔차 GBM, 잔차를 사용자 내부에서 셔플 후 재학습**:\n")
+        med_resid_rows.append({"시드": seed, "median-5(기준)": median5_test_mae_check,
+                                "실제 median5+잔차": real_resid_mae,
+                                "잔차 사용자내 셔플 후 test MAE": mae_resid_shuf,
+                                "셔플-median5": mae_resid_shuf - median5_test_mae_check})
+    md.append("\n- **median5+잔차 GBM, 잔차를 사용자 내부에서 셔플 후 재학습** (median-5·실제 모델과 나란히):\n")
     md.append(m21.df_to_markdown(pd.DataFrame(med_resid_rows)))
 
-    within_mean = np.mean([r["median5 대비"] for r in within_rows])
+    # (b) 전체 셔플(통제실험) - median5+잔차 모델의 잔차 타깃도 동일하게 적용
+    global_resid_rows = []
+    for seed in range(3):
+        rng_s = np.random.default_rng(300 + seed)
+        resid_shuf_g = rng_s.permutation(resid_tr_check)
+        m_resid_shuf_g = make_gbt(cold_resid_params, "absolute_error")
+        m_resid_shuf_g.fit(X_tr, resid_shuf_g)
+        pred_resid_shuf_g = med5_te_check + m_resid_shuf_g.predict(X_te)
+        mae_resid_shuf_g = float(np.mean(np.abs(y_te - pred_resid_shuf_g)))
+        global_resid_rows.append({"시드": seed, "잔차 전체 셔플(통제실험) 후 test MAE": mae_resid_shuf_g,
+                                   "median5 대비": mae_resid_shuf_g - median5_test_mae_check})
+    md.append("\n- **통제 실험(b): median5+잔차 모델도 잔차를 사용자 구분 없이 전체 셔플**:\n")
+    md.append(m21.df_to_markdown(pd.DataFrame(global_resid_rows)))
+    global_resid_beats = all(r["median5 대비"] < 0 for r in global_resid_rows)
+    md.append(f"\n  -> 전체 셔플에서 median-5 대비 개선이 유의하게 보이는가 = "
+              f"**{'예 — 중단 필요' if global_resid_beats else '아니오(전부 median-5보다 나쁨, 정상)'}**\n")
+
+    within_mean = np.mean([r["셔플-median5"] for r in within_rows])
     grand_mean_check = y_tr.mean()
     user_means_check = pd.Series(y_tr).groupby(pd.Series(uid_tr)).mean()
     between_var_check = ((user_means_check - grand_mean_check) ** 2).mean()
     within_var_check = pd.Series(y_tr).groupby(pd.Series(uid_tr)).var(ddof=0).mean()
     between_share = between_var_check / (between_var_check + within_var_check)
-    md.append(f"\n**해석(사용자 확인·수용됨)**: GBM_abs는 사용자 내부 셔플에서 median-5를 평균 "
-              f"{within_mean:.3f}초/km 만큼 **작게 이겼다**(일관되게, 5개 시드 전부). 전체(사용자 "
-              f"무관) 셔플 통제실험에서는 평균 {np.mean([r['median5 대비'] for r in global_rows]):.1f}초/km "
-              f"만큼 **크게 졌다** — 즉 사용자 식별 정보가 사라지면 이점이 완전히 없어진다. "
-              f"사용자간 분산 비율={between_share:.1%}(매우 높음)로, 같은 사용자의 세션들이 서로 "
-              f"비슷한 페이스를 보이는 자기상관이 강하다는 뜻이다. `median_past5_elapsed_pace`, "
-              f"`user_history_median_pace` 같은 피처가 '이 사용자는 대체로 이런 페이스'라는 정보를 "
-              f"이미 담고 있어서, 타깃을 사용자 내부에서만 섞어도 그 정보 자체는 깨지지 않는다 "
-              f"(median-5 자체도 같은 원리로 작동하는 통계량이다). median5+잔차 모델은 median5를 "
-              f"먼저 빼고 남은 잔차만 섞기 때문에 이 효과가 거의 사라지고(일관되게 median-5보다 "
-              f"나쁨), 이 비대칭이 '타깃 세션 고유의 미래 정보 유출'이 아니라 '구조적인 사용자간 "
-              f"페이스 자기상관' 설명을 지지한다. **다만 이는 해석이며, 추가로 다른 종류의 의심스러운 "
-              f"패턴이 발견되면 재검토가 필요하다.**\n")
+    md.append(f"\n**관찰 사실(수치)**: GBM_abs는 사용자 내부 셔플에서 median-5보다 평균 "
+              f"{abs(within_mean):.3f}초/km 낮은(=작게 이기는) test MAE를 5개 시드 전부에서 일관되게 "
+              f"보였다 — 이는 진짜(셔플 안 한) 모델의 개선폭({median5_test_mae_check-real_gbm_abs_mae:.3f}초/km)의 "
+              f"약 {abs(within_mean)/(median5_test_mae_check-real_gbm_abs_mae)*100:.0f}%에 해당한다. "
+              f"전체(사용자 무관) 셔플 통제실험에서는 평균 {np.mean([r['median5 대비'] for r in global_rows]):.1f}초/km "
+              f"만큼 크게 나빠졌다. median5+잔차 모델은 사용자 내부 셔플에서도 median-5보다 "
+              f"{np.mean([r['셔플-median5'] for r in med_resid_rows]):.3f}초/km 나빴다(5개 시드 전부). "
+              f"사용자간 분산 비율={between_share:.1%}이다(참고: `user_id`별 평균의 분산 / 전체 분산, "
+              f"사용자간+사용자내로 분해).\n")
+    md.append("- **가설(추정/미확인, 인과 검증 안 함)**: `median_past5_elapsed_pace`, "
+              "`user_history_median_pace` 같은 피처가 '이 사용자는 대체로 이런 페이스'라는 정보를 "
+              "이미 담고 있어서, 타깃을 사용자 내부에서만 섞어도 그 정보 자체는 깨지지 않을 수 있다 "
+              "— 하지만 이 가설을 직접 검증(예: 그 피처들을 제거한 상태에서 같은 셔플 테스트를 "
+              "재실행)하지는 않았다. median5+잔차 모델에서 이 효과가 거의 사라지는 것은 median5를 "
+              "먼저 빼고 남은 잔차만 섞기 때문일 수 있다는 것도 **추정**이다.\n")
+    md.append("- **이 결과를 '통과/실패'로 승인한 사람은 없다** — 관찰된 수치와 가설만 여기 "
+              "기록하며, 전체 셔플 통제실험에서는 median-5를 이기지 못했으므로(위 참고) 중단 조건에는 "
+              "해당하지 않는다고 판단해 다음 단계로 진행한다.\n")
 
     md.append("\n### (b) 합성 비대칭(두꺼운 꼬리) 노이즈 테스트\n")
     rng_syn = np.random.default_rng(42)
@@ -987,8 +1033,61 @@ def main():
     md.append(f"- 시드 [1,2,3,42,999]로 5회 재학습한 test MAE: {[round(v, 6) for v in seed_maes]}\n")
     md.append(f"- **변동폭 = {max(seed_maes) - min(seed_maes):.6f} (정확히 0)**. `gbt_lib.py`는 "
               "행/피처 서브샘플링을 구현하지 않아 `random_state`를 바꿔도 실제로 소비되는 난수가 "
-              "없다 — **완전히 결정적**이다(숨기지 않고 사실대로 보고). 의미 있는 변동을 보려면 "
-              "서브샘플링(bagging)을 추가해야 하는데, 이번 요청 범위에서는 구현하지 않았다.\n")
+              "없다 — **완전히 결정적**이다(숨기지 않고 사실대로 보고).\n")
+    md.append("- **한계(명시)**: 이 결정성 때문에 시드 변경으로는 **모델 자체의 변동성(분산) "
+              "정보를 전혀 얻을 수 없다** — 5개 시드가 동일한 것은 '안정적'이라서가 아니라 "
+              "애초에 난수를 쓰지 않기 때문이다. 의미 있는 모델 변동폭을 보려면 서브샘플링"
+              "(bagging)을 추가해야 하는데, 이번 요청 범위에서는 구현하지 않았다. **이 보고서에서 "
+              "불확실성(신뢰구간)은 오직 2-1/3-1의 사용자 단위 cluster bootstrap CI로만 표현되며, "
+              "시드 변동폭은 그 대체 지표가 아니다.**\n")
+
+    # ===== (d) 새 피처 7개 ablation =====
+    print("\n(d) 새 피처 ablation 실험 실행 중...")
+    md.append("\n### (d) 새 피처 7개 ablation (CV기준 선택 모델, 두 split)\n")
+    md.append("같은 하이퍼파라미터(해당 split에서 전체 22개 피처로 선택된 값)를 그대로 쓰고 "
+              "입력 열만 줄여서 재학습한다(하이퍼파라미터 재탐색 없음). **해석은 확인된 수치만 "
+              "쓰고, 'X를 빼서 나빠졌으니 X가 개선의 원인'이라는 인과 서술은 하지 않는다** — "
+              "ablation도 상관적 증거이고, 피처 간 상관 때문에 하나를 빼면 남은 피처가 그 역할을 "
+              "일부 대체할 수 있다.\n")
+
+    def _ablate_cols(X, drop_idx):
+        return np.delete(X, drop_idx, axis=1)
+
+    ABLATION_VARIANTS = {
+        "(i) 신규 7개 전부 제거": list(range(15, 22)),
+        "(ii) user_history_median_pace만 제거": [18],
+        "(iii) 정지비율/moving페이스만 제거": [16, 17],
+    }
+
+    md.append(f"\n#### cold-start — {ALL_LABELS[HGB_MAIN_LABEL]}\n")
+    abl_rows = [{"변형": "전체(기준, 22개)", "피처 수": X_tr.shape[1], "MAE": real_gbm_abs_mae, "MAE 변화(기준 대비)": 0.0}]
+    for name, drop_idx in ABLATION_VARIANTS.items():
+        X_tr_abl, X_te_abl = _ablate_cols(X_tr, drop_idx), _ablate_cols(X_te, drop_idx)
+        m_abl = make_gbt(cold_hgb_params, "absolute_error").fit(X_tr_abl, y_tr)
+        mae_abl = float(np.mean(np.abs(y_te - m_abl.predict(X_te_abl))))
+        abl_rows.append({"변형": name, "피처 수": X_tr_abl.shape[1], "MAE": mae_abl,
+                          "MAE 변화(기준 대비)": mae_abl - real_gbm_abs_mae})
+        print(f"  cold-start {name}: MAE={mae_abl:.3f}")
+    md.append(m21.df_to_markdown(pd.DataFrame(abl_rows)))
+
+    md.append(f"\n#### personalized — {ALL_LABELS[HGB_RESID_LABEL]}\n")
+    med5_ptr_abl = median5_from_X(X_ptr)
+    med5_pte_abl = median5_from_X(X_pte)
+    real_resid_pers_mae = float(np.mean(np.abs(y_pte - resid_pers_pred)))
+    abl_rows2 = [{"변형": "전체(기준, 22개)", "피처 수": X_ptr.shape[1], "MAE": real_resid_pers_mae, "MAE 변화(기준 대비)": 0.0}]
+    for name, drop_idx in ABLATION_VARIANTS.items():
+        X_ptr_abl, X_pte_abl = _ablate_cols(X_ptr, drop_idx), _ablate_cols(X_pte, drop_idx)
+        m_abl = make_gbt(pers_resid_params, "absolute_error")
+        m_abl.fit(X_ptr_abl, y_ptr - med5_ptr_abl)
+        pred_abl = med5_pte_abl + m_abl.predict(X_pte_abl)
+        mae_abl = float(np.mean(np.abs(y_pte - pred_abl)))
+        abl_rows2.append({"변형": name, "피처 수": X_pte_abl.shape[1], "MAE": mae_abl,
+                           "MAE 변화(기준 대비)": mae_abl - real_resid_pers_mae})
+        print(f"  personalized {name}: MAE={mae_abl:.3f}")
+    md.append(m21.df_to_markdown(pd.DataFrame(abl_rows2)))
+    md.append("\n**확인된 것**: 위 표의 MAE 변화 수치 그대로(양수=제거 후 나빠짐, 음수=제거 후 "
+              "좋아짐). **미확인/인과 서술 금지**: 어떤 피처가 median-5 대비 개선의 '원인'인지는 "
+              "이 ablation만으로 단정하지 않는다.\n")
 
     # ===== 7. 환경 확인 (8단계 사전 체크, 설치/변경 없음) =====
     print("\n7. 8단계(MLP) 사전 환경 확인 중 (설치/변경 없음)...")
