@@ -974,6 +974,57 @@ def main():
     md.append(f"\n  -> 전체 셔플에서 median-5 대비 개선이 유의하게 보이는가 = "
               f"**{'예 — 중단 필요' if global_resid_beats else '아니오(전부 median-5보다 나쁨, 정상)'}**\n")
 
+    md.append("\n### (a') personalized: 라벨 셔플 보완 (9단계 보완에서 추가 — Part A 당시엔 "
+              "cold-start만 실행했고, personalized는 빠져 있었다)\n")
+    median5_pers_mae_check = float(np.mean(np.abs(y_pte - median5_from_X(X_pte))))
+    real_resid_pers_mae_check = float(np.mean(np.abs(y_pte - resid_pers_pred)))
+    md.append(f"**기준값**: median-5 test MAE={median5_pers_mae_check:.3f}, 실제 median5+잔차 GBM "
+              f"test MAE={real_resid_pers_mae_check:.3f}(개선폭 {median5_pers_mae_check-real_resid_pers_mae_check:.3f}).\n")
+    med_ptr_check2, med_pte_check2 = median5_from_X(X_ptr), median5_from_X(X_pte)
+    resid_ptr_check2 = y_ptr - med_ptr_check2
+    uid_ptr_check2 = np.array([s["user_id"] for s in p_train_samples])
+
+    pers_within_rows = []
+    for seed in range(5):
+        rng_s = np.random.default_rng(400 + seed)
+        resid_shuf_p = _shuffle_within_user(resid_ptr_check2, uid_ptr_check2, rng_s)
+        m_shuf_p = make_gbt(pers_resid_params, "absolute_error")
+        m_shuf_p.fit(X_ptr, resid_shuf_p)
+        pred_shuf_p = med_pte_check2 + m_shuf_p.predict(X_pte)
+        mae_shuf_p = float(np.mean(np.abs(y_pte - pred_shuf_p)))
+        pers_within_rows.append({"시드": seed, "median-5(기준)": median5_pers_mae_check,
+                                  "실제 median5+잔차": real_resid_pers_mae_check,
+                                  "잔차 사용자내 셔플 후 test MAE": mae_shuf_p,
+                                  "셔플-median5": mae_shuf_p - median5_pers_mae_check})
+    md.append("- **median5+잔차 GBM(personalized), 잔차를 사용자 내부에서 셔플 후 재학습**:\n")
+    md.append(m21.df_to_markdown(pd.DataFrame(pers_within_rows)))
+
+    pers_global_rows = []
+    for seed in range(3):
+        rng_s = np.random.default_rng(500 + seed)
+        resid_shuf_pg = rng_s.permutation(resid_ptr_check2)
+        m_shuf_pg = make_gbt(pers_resid_params, "absolute_error")
+        m_shuf_pg.fit(X_ptr, resid_shuf_pg)
+        pred_shuf_pg = med_pte_check2 + m_shuf_pg.predict(X_pte)
+        mae_shuf_pg = float(np.mean(np.abs(y_pte - pred_shuf_pg)))
+        pers_global_rows.append({"시드": seed, "잔차 전체 셔플(통제실험) 후 test MAE": mae_shuf_pg,
+                                  "median5 대비": mae_shuf_pg - median5_pers_mae_check})
+    md.append("\n- **통제 실험: personalized도 잔차를 사용자 구분 없이 전체 셔플**:\n")
+    md.append(m21.df_to_markdown(pd.DataFrame(pers_global_rows)))
+    pers_global_beats = all(r["median5 대비"] < 0 for r in pers_global_rows)
+    md.append(f"\n  -> 전체 셔플에서 median-5 대비 개선이 유의하게 보이는가 = "
+              f"**{'예 — 중단 필요' if pers_global_beats else '아니오(전부 median-5보다 나쁨, 정상)'}**\n")
+    pers_within_mean = np.mean([r["셔플-median5"] for r in pers_within_rows])
+    md.append(f"\n**해석**: personalized의 사용자 내부 셔플에서도 median5+잔차 모델은 median-5보다 "
+              f"평균 {pers_within_mean:+.3f}초/km 차이를 보였다(cold-start의 GBM_abs처럼 뚜렷하게 "
+              f"이기지는 않음). 참고로 **cold-start GBM_abs는 사용자 내부 셔플(시간 순서 정보가 "
+              f"전혀 없는 조건)에서도 median-5를 평균 0.366초/km 이겼는데(위 (a) 참고), 이는 "
+              f"시간 순서 정보 없이 사용자 수준 정보(과거 5개 세션의 피처값 자체)만으로도 "
+              f"얻을 수 있는 이득이 있음을 시사하며, 그 개선의 일부가 '이 사용자의 장기적인 페이스 "
+              f"수준 추정'에서 올 수 있다는 가설이다(**추정/미확인**, 인과 검증 안 함).** "
+              f"전체(사용자 무관) 셔플 통제실험에서는 cold-start/personalized 둘 다 median-5를 "
+              f"이기지 못했으므로(위 결과) 중단 조건에는 해당하지 않는다.\n")
+
     within_mean = np.mean([r["셔플-median5"] for r in within_rows])
     grand_mean_check = y_tr.mean()
     user_means_check = pd.Series(y_tr).groupby(pd.Series(uid_tr)).mean()
@@ -1048,7 +1099,10 @@ def main():
               "입력 열만 줄여서 재학습한다(하이퍼파라미터 재탐색 없음). **해석은 확인된 수치만 "
               "쓰고, 'X를 빼서 나빠졌으니 X가 개선의 원인'이라는 인과 서술은 하지 않는다** — "
               "ablation도 상관적 증거이고, 피처 간 상관 때문에 하나를 빼면 남은 피처가 그 역할을 "
-              "일부 대체할 수 있다.\n")
+              "일부 대체할 수 있다. **한계(명시)**: 아래 MAE 변화는 각 변형을 1회만 재학습한 "
+              "점추정값이고, 사용자 단위 bootstrap CI를 계산하지 않았다 — 변화량이 통계적으로 "
+              "0과 다른지는 **미확인**이며, 이 수치만으로 어떤 변형이 '유의하게' 더 나쁜지 "
+              "단정하지 않는다.\n")
 
     def _ablate_cols(X, drop_idx):
         return np.delete(X, drop_idx, axis=1)
