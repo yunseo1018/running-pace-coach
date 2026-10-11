@@ -14,6 +14,8 @@
 
 **9단계(종합) 결과**: GBM·MLP는 median-5 대비 MAE 2.6~3.0초/km(4~5%) 개선, 서로는 구분 안 됨. 사후 추가한 단순 규칙 0.5×median5+0.5×전체이력중앙값이 GBM·MLP와 MAE CI 안에서 구분되지 않음(개선폭의 상당 부분이 단순 규칙으로 재현 가능). MAE와 RMSE 순위가 다름(RMSE 1위는 두 조건 모두 Ridge, GBM은 cold-start RMSE에서 median-5보다도 높음; RMSE는 상위 1% 윈도우에 좌우). history 길이별 개선 증가 규칙 미충족으로 LSTM 미시도 (`docs/model_comparison.md` 참고).
 
+**10~11단계(코칭 1단계/평가 분리, 합성 목표 기반) 결과**: 실제 사용자 목표 데이터가 없어 모든 결과는 합성 시나리오이며 실제 코칭 성능이 아님. 판정 불일치율은 median-5 제외 62~67%로 예측 오차·러닝 간 변동에 지배됨. 학습/이력 구간에서 정한 상수 규칙 대비 GBM/MLP는 cold-start에서 구분 안 됨, personalized에서 약 3.6~4.1%p 낮음(CI 0 불포함); 전체 이력 중앙값 대비로는 cold-start에서 오히려 1.4~2.1%p 높음. median-5 대비 감소폭은 구조 효과라 헤드라인에 쓰지 않음 (`docs/coaching_results.md` 참고).
+
 10월 2주차 작업 순서 (반드시 이 순서, 건너뛰지 않는다):
 1. 원본 필드 출처 확인, 거리 컬럼 분리(planned/actual), 메인 태스크를 "과거 기록만 입력"으로 복원
 2. 과거 정보만 썼는지 감사(last_input_session_time 검증) 및 baseline 재실행
