@@ -287,6 +287,18 @@ def main():
     combined_cold_df["split"] = "cold-start"
     combined_pers_df["split"] = "personalized"
 
+    md.append("## 헤드라인 (확인된 사실 / 추정 구분)\n")
+    md.append("**확인된 사실 (이 문서의 표와 CI에서 직접 읽힌 것)**\n")
+    md.append("- 학습 모델(GBM, MLP)은 두 평가 조건 모두에서 median-5보다 MAE가 낮고 쌍체 차이 CI가 0을 포함하지 않는다(개선폭 2.6~3.0초/km, 4~5%). 그러나 이것만으로 끝나는 결론이 아니다:\n")
+    md.append("- **사후 추가 baseline (median-10, median-20, 전체 이력 중앙값, 결합 규칙 (d))은 ablation 결과를 본 뒤 추가한 것이고, "
+              "후보 4개 중 가장 좋은 것(d)을 함께 보고하는 것이라 약간의 낙관(선택 편향) 가능성이 있다.** 이 4개는 고정했고 더 추가하지 않았다.\n")
+    md.append("- **cold-start**: (d) 0.5×median-5+0.5×전체 이력 중앙값은 GBM/MLP와 MAE 차이의 CI가 0을 포함해 구분되지 않는다(GBM−(d) +0.198, MLP−(d) +0.095초/km; 점추정은 오히려 (d)가 약간 낮음).\n")
+    md.append("- **personalized**: GBM/MLP가 (d)보다 MAE가 낮다(GBM 0.668, MLP 0.780초/km). 다만 CI는 MLP만 0을 포함하지 않고(MLP [0.347, 1.403]), "
+              "GBM은 0을 포함한다(GBM [−0.036, 1.374]) — 즉 '약 0.7~0.8초/km 낮다'는 점추정이고 유의성은 MLP에서만 확인된다.\n")
+    md.append("- **코칭 판정(합성 시나리오, `docs/coaching_results.md`)**: cold-start에서는 전체 이력 중앙값 예측기가 GBM/MLP보다 판정 불일치율이 낮고(CI 0 불포함), personalized에서는 구분되지 않는다.\n")
+    md.append("- MAE와 RMSE의 순위는 다르다(3절). 개선폭 비율은 점추정 기준이며 2-3절에 계산 방식을 명시했다.\n")
+    md.append("\n**추정/미확인**: (d)가 GBM/MLP만큼 좋은 이유(장기 페이스 수준 정보가 개선의 상당 부분을 설명한다는 가설)는 직접 검증하지 않았다. "
+              "personalized에서 GBM/MLP가 (d)보다 낮은 이유(시간 순서 정보 활용 등)도 미확인이다.\n\n")
     md.append("## 1. 종합표 (동일 윈도우, 재탐색 없음)\n")
     all_rows = []
     boot_results = {}
@@ -356,17 +368,24 @@ def main():
                                  "0포함": bool(lo <= 0 <= hi)})
         md.append(m21.df_to_markdown(pd.DataFrame(rows)))
         md.append("\n")
+        cur_df = combined_cold_df if split_name == "cold-start" else combined_pers_df
+        full_mae = cur_df.groupby("baseline")["abs_error"].mean()  # 전체 표본 평균 MAE (점추정)
         for model in [GBM_LABEL, MLP_LABEL]:
             gain_model = boot_mae["median5"] - boot_mae[model]
             for name in POST_HOC_NAMES:
                 gain_rule = boot_mae["median5"] - boot_mae[name]
                 ratio = gain_rule / gain_model
                 lo, hi = np.percentile(ratio, [2.5, 97.5])
+                point_gm = full_mae["median5"] - full_mae[model]
+                point_gr = full_mae["median5"] - full_mae[name]
                 share_rows.append({"평가조건": split_name, "모델": ALL_LABELS[model], "단순규칙": ALL_LABELS[name],
-                                   "규칙 개선폭(vs median5)": gain_rule.mean(), "모델 개선폭(vs median5)": gain_model.mean(),
-                                   "규칙/모델 비율(중앙값)": float(np.median(ratio)), "비율 95%CI": f"[{lo:.2f},{hi:.2f}]"})
+                                   "규칙 개선폭(점추정)": point_gr, "모델 개선폭(점추정)": point_gm,
+                                   "비율(점추정)": point_gr / point_gm,
+                                   "참고: bootstrap 비율 중앙값": float(np.median(ratio)), "비율 95%CI(bootstrap)": f"[{lo:.2f},{hi:.2f}]"})
     md.append("\n## 2-3. median-5 대비 GBM·MLP 개선폭 중 각 단순 규칙이 차지하는 비율\n")
-    md.append("비율 = (median5 MAE - 규칙 MAE) / (median5 MAE - 모델 MAE). 같은 bootstrap 표본 안에서 계산. "
+    md.append("**계산 방식(정정됨)**: 주 수치 '비율(점추정)' = 전체 평가 표본의 평균 MAE로 계산한 (median5 MAE − 규칙 MAE) / (median5 MAE − 모델 MAE). "
+              "이전 버전은 bootstrap 반복마다 계산한 비율의 중앙값을 보고했는데(예: cold-start (d) vs GBM 1.058), 비율의 중앙값은 평균 MAE 개선폭의 비율(1.074)과 일반적으로 같지 않으므로 "
+              "점추정으로 바꿨다. bootstrap 열은 참고용(중앙값)과 95% CI(비율 분포 percentile)다. "
               "분모(모델 개선폭)가 작아 CI가 넓을 수 있다. 1에 가까울수록 모델 개선폭을 그 단순 규칙이 설명한다는 뜻(상관적 해석, 인과 아님).\n")
     md.append(m21.df_to_markdown(pd.DataFrame(share_rows)))
     md.append("\n")
@@ -388,9 +407,13 @@ def main():
               f"6b(22피처) {parts[0][3]:.3f} (6단계 대비 {parts[0][3]-69.928:+.3f})\n")
     md.append(f"- personalized: 6a(15피처) MAE {parts[1][1]:.3f} vs 6단계 62.054 (차이 {parts[1][1]-62.054:+.3f}); "
               f"6b(22피처) {parts[1][3]:.3f} (6단계 대비 {parts[1][3]-62.054:+.3f})\n")
-    md.append("- 판독: 6a가 6단계 숫자와 비슷하면 6단계→현재 차이는 대부분 피처 구성(15→22) 때문, 6a도 6단계와 "
-              "크게 다르면 윈도우 구성이나 학습 설정(예: alpha 선택 방식)의 영향이 섞여 있다. "
-              "후자인 경우 그 원인은 **추정/미확인**이다(6단계 학습 설정을 여기서 재현해 대조하지 않음).\n\n")
+    md.append("- **정정 및 원인 분해** (`docs/ridge_discrepancy.md`, 30_ridge_discrepancy.py): 이전 버전은 이 차이를 '피처 구성 때문'이라고 적었으나 틀렸다. "
+              "6a는 6단계와 같은 15피처다. 6단계 설정(ridge_lib, 04/06 윈도우, alpha=0.0001)은 MAE 69.928493 / 62.053868을 그대로 재현했고(S0), "
+              "윈도우를 24단계로 바꿔도 +0.001~0.002에 그쳤으며(S1~S3), **차이(+0.34 / +0.21)는 거의 전부 alpha 때문이다**: 종합표 6a는 7단계에서 22피처로 선택된 alpha=10000을 "
+              "15피처에도 그대로 썼다(S4: ridge_lib로 alpha만 1e4로 바꾸면 70.2737 / 62.2698). 구현 전환(ridge_lib→sklearn)은 소수 3자리까지 같은 값(S5)이어서 영향이 확인되지 않았다 "
+              "(S6 '구현만 전환' 단계는 sklearn import가 정책으로 차단된 실행에서는 미실행). "
+              "따라서 6a는 15피처 자신의 CV로 고른 alpha가 아니라 22피처용 alpha를 쓴 값이며, 6단계 설정 값(69.929 / 62.056)이 더 적절한 '15피처 기준'이다. "
+              "15→22피처 효과는 6단계 설정 기준 MAE −4.25(cold-start) / −3.74(personalized), 종합표 6a 기준 −4.59 / −3.96이다(후자는 alpha 차이가 섞인 값).\n\n")
 
     # ===== 4. MAE/RMSE 순위 (각각 따로) =====
     md.append("\n## 3. MAE/RMSE 순위 (따로 서술)\n")

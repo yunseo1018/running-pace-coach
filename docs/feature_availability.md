@@ -16,7 +16,7 @@
 | `gender` | str | `'male'` |
 | `heart_rate` | list[int] | `[100, 111, 120, ...]` |
 | `id` | int | `396826535` (세션/워크아웃 id) |
-| `url` | str | `'https://www.endomondo.com/users/10921915/workouts/396826535'` |
+| `url` | str | `'https://www.endomondo.com/users/<USER_ID>/workouts/<WORKOUT_ID>'` |
 | `userId` | int | `10921915` |
 | `timestamp` | list[int], unix epoch seconds | `[1408898746, 1408898754, 1408898765, ...]` |
 | `longitude` | list[float] | `[24.64977040886879, ...]` |
@@ -147,7 +147,7 @@ altitude: list(len=500), sample=[41.6, 40.6, 40.6]
 gender: 'male'
 heart_rate: list(len=500), sample=[100, 111, 120]
 id: 396826535
-url: 'https://www.endomondo.com/users/10921915/workouts/396826535'
+url: 'https://www.endomondo.com/users/<USER_ID>/workouts/<WORKOUT_ID>'
 userId: 10921915
 timestamp: list(len=500), sample=[1408898746, 1408898754, 1408898765]
 longitude: list(len=500), sample=[24.64977040886879, 24.65014273300767, 24.650910682976246]
