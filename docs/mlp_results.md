@@ -3,7 +3,8 @@
 입력 메인 데이터: `data\run_sessions_deduped_merged.pkl` (세션 105709건, 사용자 854명, assert 통과)
 
 ## 0. 환경
-- (진단 생략) 이번 실행에서 sklearn import 실패(`DLL load failed while importing _minpack: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`)로 MLPRegressor 코드 확인을 다시 하지 않았다. 이전 실행에서의 확인 결과(sklearn 1.9.1): `loss`는 'squared_error'/'poisson'만 지원.
+- **sklearn.neural_network.MLPRegressor의 `loss` 파라미터 기본값/타입**: `'squared_error'` (코드 기준, `inspect.signature` 확인)
+- **docstring 발췌**: loss : {'squared_error', 'poisson'}, default='squared_error' / "squared error" and "poisson" losses actually implement / "half squares error" and "half poisson deviance" to simplify the
 - **확인됨**: MLPRegressor는 `loss ∈ {'squared_error', 'poisson'}`만 지원하고 **L1(절대오차) 손실 옵션이 없다.** 그래서 메인 모델에 쓰지 않고, torch로 직접 L1Loss 기반 MLP를 구현했다.
 - torch: 2.14.0+cpu, numpy: 2.5.3
 - **결정성 설정**: 각 학습 전 `torch.manual_seed(seed)`를 호출한다. CPU 전용 실행(torch 2.14.0+cpu, GPU 미사용)이며, `torch.use_deterministic_algorithms`는 강제하지 않았다(의도적으로 시드 간 실제 변동을 관찰하기 위함 — 4번 참고). 데이터 순서 셔플(`torch.randperm`)도 `manual_seed`에 종속된다.
@@ -153,13 +154,13 @@
 ### 쌍체 차이 95% CI (MLP 주 결과 vs median-5, vs 7단계 GBM)
 
 #### cold-start — MLP 주 결과: 8b. MLP(median5+잔차, L1)
-- **MAE: median-5 - MLP** = 2.861 (95% CI [2.178, 3.597]) -> 0 미포함, MLP가 유의하게 나음
+- **MAE: median-5 - MLP** = 2.861 (95% CI [2.178, 3.597]) -> 0 미포함, MLP가 유의하게 나음 (윈도우 풀링 MAE 기준, 22피처 기준; 사용자별 MAE 평균(macro)에서는 일부 조건에서 CI가 0을 포함하고, cold-start GBM22처럼 점추정이 오히려 높은 경우가 있음 — `docs/same_scope_comparison.md` 7-3절)
 - **MAE: GBM - MLP** = 0.304 (95% CI [-0.361, 1.203]) -> 0 포함, 유의한 차이 없음
 - **RMSE: GBM - MLP** = 13.152 (95% CI [0.869, 26.030]) -> 0 미포함, MLP가 유의하게 나음 (**주의: CI 하한 0.869이 0에 매우 가깝고 구간 폭이 25.2로 넓다** — 통계적으로는 유의하지만 경계선에 걸쳐 있다는 점을 같이 봐야 한다)
   - 이 RMSE 차이의 원인(예: GBM이 극단 페이스 윈도우에 더 민감한지)은 별도로 검증하지 않았다 — **추정/미확인**으로만 남긴다.
 
 #### personalized — MLP 주 결과: 8b. MLP(median5+잔차, L1)
-- **MAE: median-5 - MLP** = 2.955 (95% CI [2.174, 3.849]) -> 0 미포함, MLP가 유의하게 나음
+- **MAE: median-5 - MLP** = 2.955 (95% CI [2.174, 3.849]) -> 0 미포함, MLP가 유의하게 나음 (윈도우 풀링 MAE 기준, 22피처 기준; 사용자별 MAE 평균(macro)에서는 일부 조건에서 CI가 0을 포함하고, cold-start GBM22처럼 점추정이 오히려 높은 경우가 있음 — `docs/same_scope_comparison.md` 7-3절)
 - **MAE: GBM - MLP** = 0.112 (95% CI [-0.433, 0.806]) -> 0 포함, 유의한 차이 없음
 - **RMSE: GBM - MLP** = 7.392 (95% CI [-3.803, 20.858]) -> 0 포함, 유의한 차이 없음
 
@@ -177,4 +178,4 @@ cold-start의 하이퍼파라미터 선택은 train 사용자 5-fold GroupKFold�
 | sklearn GroupKFold (커밋 00c27d1 시점, 문서 기록값) | {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0}, 에폭 97 | 59.578 | 59.514±0.050 | 2.661 [1.865, 3.535] | 0.104 [-0.560, 0.941] |
 | ridge_lib GroupKFold (현재, 고정) | {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0001}, 에폭 112 | 59.374 | 59.379±0.089 | 2.861 [2.178, 3.597] | 0.304 [-0.361, 1.203] |
 
-**기록**: fold 구성이 바뀌자 선택된 구조·에폭이 달라졌고 cold-start MLP의 test MAE가 약 0.2초/km 움직였다. 두 설정 모두에서 MLP는 median-5보다 유의하게 낫고 GBM과는 구분되지 않는다(위 CI 기준). 이 0.2초/km는 하이퍼파라미터 선택이 검증 fold 구성에 민감하다는 정도를 보여주는 값이며, GBM은 같은 격자·같은 선택이 유지됐다(7단계 문서). 이 변동의 원인 분해(검증 fold 데이터 차이 vs 조기종료/에폭 변화)는 하지 않았다 — **추정/미확인**.
+**기록**: fold 구성이 바뀌자 선택된 구조·에폭이 달라졌고 cold-start MLP의 test MAE가 약 0.2초/km 움직였다. 두 설정 모두에서 MLP는 median-5보다 유의하게 낫고 GBM과는 구분되지 않는다(위 CI 기준) (윈도우 풀링 MAE 기준, 22피처 기준; 사용자별 MAE 평균(macro)에서는 일부 조건에서 CI가 0을 포함하고, cold-start GBM22처럼 점추정이 오히려 높은 경우가 있음 — `docs/same_scope_comparison.md` 7-3절). 이 0.2초/km는 하이퍼파라미터 선택이 검증 fold 구성에 민감하다는 정도를 보여주는 값이며, GBM은 같은 격자·같은 선택이 유지됐다(7단계 문서). 이 변동의 원인 분해(검증 fold 데이터 차이 vs 조기종료/에폭 변화)는 하지 않았다 — **추정/미확인**.

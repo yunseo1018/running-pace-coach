@@ -157,6 +157,11 @@ def cluster_bootstrap(df, baseline_names, n_boot=N_BOOTSTRAP, seed=BOOTSTRAP_SEE
         g = g.reindex(user_ids).fillna(0)
         per_user[baseline] = (g["sum_abs"].to_numpy(), g["sum_sq"].to_numpy(), g["n"].to_numpy())
 
+    # 3주차 3-(i): 모든 방법의 사용자별 윈도우 수가 같아야 쌍체 비교가 성립한다(다르면 중단).
+    _ref_n = per_user[baseline_names[0]][2]
+    for b in baseline_names:
+        assert np.array_equal(per_user[b][2], _ref_n), f"방법 간 사용자별 윈도우 수 불일치: {b}"
+
     boot_mae = {b: np.empty(n_boot) for b in baseline_names}
     boot_rmse = {b: np.empty(n_boot) for b in baseline_names}
     for i in range(n_boot):

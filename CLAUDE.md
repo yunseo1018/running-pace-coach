@@ -12,13 +12,19 @@
 
 **6단계(Ridge) 결과**: Ridge는 MAE에서 median-5를 유의하게 못 이김, RMSE는 상위 baseline과 구분 안 됨, LSTM은 보류 (`docs/ridge_results.md` 참고).
 
-**7단계(트리) 결과**: 확장 피처 + 직접 구현 GBM(gbt_lib, absolute_error/median5+잔차)이 cold-start·personalized 둘 다 median-5를 MAE 신뢰구간 밖에서 유의하게 이김(절대 개선폭 2.6~2.8초/km, median-5 대비 4~5%; RMSE는 구분 안 됨). sklearn.tree가 이 환경에서 차단되어(HistGradientBoosting 등 전부 실패) sklearn은 쓰지 않고 `gbt_lib.py`로 직접 구현해 사용함. CV기준 선택 모델과 테스트 1위 모델이 split마다 다르지만(cold-start=absolute_error, personalized=median5+잔차) 둘 다 median-5를 이겨 결론은 바뀌지 않음 (`docs/tree_results.md` 참고).
+**7단계(트리) 결과**: 확장 피처 + 직접 구현 GBM(gbt_lib, absolute_error/median5+잔차)이 cold-start·personalized 둘 다 median-5를 MAE 신뢰구간 밖에서 유의하게 이김(절대 개선폭 2.6~2.8초/km, median-5 대비 4~5%; RMSE는 구분 안 됨). sklearn.tree가 이 환경에서 차단되어(HistGradientBoosting 등 전부 실패) sklearn은 쓰지 않고 `gbt_lib.py`로 직접 구현해 사용함. CV기준 선택 모델과 테스트 1위 모델이 split마다 다르지만(cold-start=absolute_error, personalized=median5+잔차) 둘 다 median-5를 이겨 결론은 바뀌지 않음 (`docs/tree_results.md` 참고). (윈도우 풀링 MAE 기준, 22피처 기준; 사용자별 MAE 평균(macro)에서는 일부 조건에서 CI가 0을 포함하고, cold-start GBM22처럼 점추정이 오히려 높은 경우가 있음 — `docs/same_scope_comparison.md` 7-3절)
 
-**8단계(MLP) 결과**: MLP는 GBM과 MAE 동률, median-5 대비 유의한 개선, RMSE 해석은 상위 1% 윈도우에 좌우 (`docs/mlp_results.md` 참고).
+**8단계(MLP) 결과**: MLP는 GBM과 MAE 동률, median-5 대비 유의한 개선, RMSE 해석은 상위 1% 윈도우에 좌우 (`docs/mlp_results.md` 참고). (윈도우 풀링 MAE 기준, 22피처 기준; 사용자별 MAE 평균(macro)에서는 일부 조건에서 CI가 0을 포함하고, cold-start GBM22처럼 점추정이 오히려 높은 경우가 있음 — `docs/same_scope_comparison.md` 7-3절)
 
-**9단계(종합) 결과**: GBM·MLP는 median-5 대비 MAE 2.6~3.0초/km(4~5%) 개선, 서로는 구분 안 됨. 탐색적 baseline(결과를 본 뒤 추가한 후보 4개 중 최고를 보고하므로 낙관 가능성이 있고, 사전 지정된 비교군이 아님) 0.5×median5+0.5×전체이력중앙값은 cold-start에서 GBM·MLP와 MAE 구분 안 됨(MAE 순위 1위는 MLP이지만 MLP−(d) −0.106, CI [−0.543, 0.337]로 (d)와 구분되지 않음), personalized에서는 GBM·MLP가 약 0.7~0.8초/km 낮음(CI는 MLP만 0 불포함: MLP−(d) −0.780, CI [−1.403, −0.347]; GBM은 −0.668, CI [−1.374, 0.036]로 0 포함). MAE와 RMSE 순위가 다름(RMSE 1위는 두 조건 모두 Ridge, GBM은 cold-start RMSE에서 median-5보다도 높음; RMSE는 상위 1% 윈도우에 좌우). history 길이별 개선 증가 규칙 미충족으로 LSTM 미시도 (`docs/model_comparison.md` 참고).
+**9단계(종합) 결과**: GBM·MLP는 median-5 대비 MAE 2.6~3.0초/km(4~5%) 개선, 서로는 구분 안 됨. 탐색적 baseline(결과를 본 뒤 추가한 후보 4개 중 최고를 보고하므로 낙관 가능성이 있고, 사전 지정된 비교군이 아님) 0.5×median5+0.5×전체이력중앙값은 cold-start에서 GBM·MLP와 MAE 구분 안 됨(MAE 순위 1위는 MLP이지만 MLP−(d) −0.106, CI [−0.543, 0.337]로 (d)와 구분되지 않음), personalized에서는 GBM·MLP가 약 0.7~0.8초/km 낮음(CI는 MLP만 0 불포함: MLP−(d) −0.780, CI [−1.403, −0.347]; GBM은 −0.668, CI [−1.374, 0.036]로 0 포함). MAE와 RMSE 순위가 다름(RMSE 1위는 두 조건 모두 Ridge, GBM은 cold-start RMSE에서 median-5보다도 높음; RMSE는 상위 1% 윈도우에 좌우). history 길이별 개선 증가 규칙 미충족으로 LSTM 미시도 (`docs/model_comparison.md` 참고). (윈도우 풀링 MAE 기준, 22피처 기준; 사용자별 MAE 평균(macro)에서는 일부 조건에서 CI가 0을 포함하고, cold-start GBM22처럼 점추정이 오히려 높은 경우가 있음 — `docs/same_scope_comparison.md` 7-3절)
 
 **10~11단계(코칭 1단계/평가 분리, 합성 목표 기반) 결과**: 실제 사용자 목표 데이터가 없어 모든 결과는 합성 시나리오이며 실제 코칭 성능이 아님. 판정 불일치율은 median-5 제외 62~67%로 예측 오차·러닝 간 변동에 지배됨. 학습/이력 구간에서 정한 상수 규칙 대비 GBM/MLP는 cold-start에서 구분 안 됨, personalized에서 약 3.6~4.1%p 낮음(CI 0 불포함); 전체 이력 중앙값 대비로는 cold-start에서 오히려 1.4~2.7%p 높음. median-5 대비 감소폭은 구조 효과라 헤드라인에 쓰지 않음 (`docs/coaching_results.md` 참고).
+
+**3주차 2·3번(동일 입력 범위 비교, 완료)** (`docs/same_scope_comparison.md`, 사전 선언 `docs/week3_predeclaration.md`):
+- 15피처 그룹(최근 5회만) 풀링 MAE 개선폭(median-5 대비): cold-start GBM15 +1.32 / MLP15 +1.18, personalized +0.80 / +0.86초/km — 22피처 모델은 같은 기준 대비 2.6~3.0초/km이나 입력 범위가 달라 그룹 간 순위는 매기지 않음.
+- 풀링 vs macro 불일치: macro MAE(사용자별 평균)에서는 GBM15/MLP15 모두 CI가 0을 포함(cold-start GBM15·GBM22는 점추정이 오히려 높음); MLP22만 cold-start macro에서도 유의하게 낮고, personalized에서는 GBM22만 macro 유의. 원인은 미확인.
+- 전체 이력 그룹: cold-start 풀링 MAE에서 (d)·MLP22·GBM22 구분 안 됨; personalized에서는 MLP22만 (d)보다 유의하게 낮음(+0.778 [0.347, 1.403], macro는 하한이 0에 매우 가까움), GBM22는 CI가 0을 포함. (d)는 탐색적 baseline.
+- Ridge15는 자체 CV alpha=1e-4(6단계와 일치), 레거시 6a(alpha=1e4 재사용)와 다른 값. 신뢰구간·assert 정비 완료.
 
 **알려진 미해결 사항 (3주차에 처리)**
 - **[완료, 커밋 a0bcfe8]** `docs/model_comparison.md` 재생성: Ridge/GroupKFold/scaler를 `ridge_lib`로 고정하고 `28_model_comparison.py`로 재생성했다. 임시 하네스 생성본(330f5f7)과 숫자 diff를 확인했고(Ridge 포함 동일), 문서 상단 "문서 생성 메모"에 하네스 사용 이력을 보존했다. 27→28→29번은 `docs/mlp_selected_hyperparams.json`으로 자동 연동된다.
@@ -85,7 +91,7 @@
 
 ## 데이터 분할 규칙 — 두 가지 평가 + 허용 학습 자료 명시
 
-1. **Cold-start 평가**: 사용자 단위 80/20 분할. 같은 사용자의 세션이 train/test 양쪽에 걸치지 않는다. **허용 학습 자료 = train 사용자의 기록뿐.** "처음 보는 사용자에게 얼마나 일반화되는가".
+1. **Cold-start 평가**: 사용자 단위 80/20 분할(정의: 학습에 없던 사용자이지만 타깃 이전 기록이 5회 이상 있는 조건). 같은 사용자의 세션이 train/test 양쪽에 걸치지 않는다. **허용 학습 자료 = train 사용자의 기록뿐.** "처음 보는 사용자에게 얼마나 일반화되는가".
 2. **Personalized 평가**: 각 사용자 내에서 시간순으로 앞부분은 history, 뒷부분은 temporal hold-out. **허용 학습 자료 = 각 사용자의 history 구간.** "기록이 쌓일수록 나아지는가".
 
 두 평가는 따로 계산하고 따로 보고한다. 각 조건의 허용 학습 자료를 코드 주석과 문서에 명시한다. 같은 운동에서 나온 세션 조각이 history/hold-out 경계에 걸치는지 확인한다.
@@ -181,7 +187,7 @@
 
 - **예측기별 사용 이력 범위 표를 비교 결과와 항상 함께 제시한다** (최근 5회 / 최근 10·20회 / 타깃 시작 이전 전체 이력 등). 서로 다른 이력 범위의 결과를 같은 선상에서 순위 매기지 않는다. 같은 입력 범위에서의 비교를 별도로 보고한다.
 - **'사후 baseline' 표현을 쓰지 않는다.** "탐색적 baseline(결과를 본 뒤 추가한 비교군)"으로 표기하고, 후보 몇 개 중 어떤 기준으로 골랐는지와 결합 비율이 결과 확인 전/후 중 언제 정해졌는지를 명시한다. 탐색 결과는 별도 검증 전까지 확정 결과로 쓰지 않는다.
-- **cold-start 정의 문구**: "학습에 없던 사용자이지만 과거 5회 기록은 있는 조건". 기록이 전혀 없는 신규 사용자와 구분한다.
+- **cold-start 정의 문구**: "학습에 없던 사용자이지만 타깃 이전 기록이 5회 이상 있는 조건(전체 이력 중앙값 피처는 더 먼 과거까지 사용)". 기록이 전혀 없는 신규 사용자와 구분한다. (3주차 2번에서 '과거 5회 기록' 문구를 정정: `docs/history_scope_table.md` 4절)
 - **개선폭은 분모를 명시한다**: '페이스 중앙값 대비 %'와 'baseline MAE 대비 %'를 섞어 쓰지 않는다.
 - **유의성/신뢰구간**: 사용자 단위 cluster bootstrap의 방법(재표집 단위, 횟수, seed, 쌍별 차이 여부), 사용자 수, 윈도우 수를 명시한다. 윈도우 평균 MAE와 사용자별 MAE의 평균을 구분해 보고한다. 유의하지 않음을 동등성 입증으로 쓰지 않는다.
 - **코칭 불일치율**: 정의(무엇의 무엇에 대한 불일치인가), 판정 범주, 분모(윈도우/사용자/체크포인트), 범주별 건수, 혼동행렬, 다수 범주만 출력하는 단순 기준과의 비교를 함께 제시한다. 불일치율은 고정 규칙에 대한 판정 일치도이며 코칭 효과나 목표 달성의 검증이 아니다. 경과 시간 기준 페이스가 느린 세션을 체력 저하나 목표 실패로 해석하지 않는다(휴식·훈련 목적의 영향 가능).
@@ -203,8 +209,8 @@
 
 0. **재현성 정리(2주차 잔여) — 완료(a0bcfe8)**: Ridge/GroupKFold/scaler를 ridge_lib로 고정 → `28_model_comparison.py`로 `docs/model_comparison.md` 재생성 → 임시 하네스 생성본과 숫자 diff 요약 → 임시 하네스 사용 이력 메모 보존.
 1. **현황 점검(읽기 전용, 변경 금지)**: (a) 예측기별 사용 이력 범위와 타깃 시작 이전 이력만 쓰는지 코드 확인, 결합 규칙 비율의 선정 시점·후보 4개 선정 경위, (b) cold-start에서 테스트 사용자의 과거 기록 사용 방식, (c) bootstrap 구현 세부와 테스트 사용자·윈도우 수, 윈도우 평균/사용자 평균 MAE 계산 여부, (d) 코칭 불일치율의 정확한 정의·분모·범주별 건수·혼동행렬·다수 범주 baseline 존재 여부, (e) 극단 세션↔윈도우 대응표·행별 예측 저장·패키지 버전·GBM 설정·sklearn traceback 기록 여부, (f) 문서에 있으나 보고에 안 쓴 것 / 코드에만 있는 것 구분. 현재 피처에 훈련 강도를 반영하는 변수(고도, 속도 변동성 등)가 있는지와 과거 세션만으로 계산되는지도 확인.
-2. **예측기별 이력 범위 표 + 같은 입력 범위 비교**: median-5/10/20/전체 이력 중앙값/결합 규칙/Ridge/GBM/MLP의 사용 이력을 표로 정리. 모델에도 타깃 시작 이전 전체 이력 요약 피처(전체 이력 중앙값, 세션 수 등)를 준 변형을 사전 선언 후 비교(CV로 선택). 결합 규칙은 탐색적 baseline으로 표기.
-3. **신뢰구간 보고 정비**: 사용자 단위 cluster bootstrap 방법·사용자 수·윈도우 수 명시, 윈도우 평균 vs 사용자별 MAE 평균 이중 보고, 개선폭 분모 병기.
+2. **[완료] 예측기별 이력 범위 표 + 같은 입력 범위 비교**: median-5/10/20/전체 이력 중앙값/결합 규칙/Ridge/GBM/MLP의 사용 이력을 표로 정리. 모델에도 타깃 시작 이전 전체 이력 요약 피처(전체 이력 중앙값, 세션 수 등)를 준 변형을 사전 선언 후 비교(CV로 선택). 결합 규칙은 탐색적 baseline으로 표기.
+3. **[완료] 신뢰구간 보고 정비**: 사용자 단위 cluster bootstrap 방법·사용자 수·윈도우 수 명시, 윈도우 평균 vs 사용자별 MAE 평균 이중 보고, 개선폭 분모 병기.
 4. **코칭 판정 정의 문서 + 혼동행렬 + 다수 범주 baseline + 판정 보류 실험**: 보류 구간은 별도 검증 자료에서 정하고 보류율, 판정 사례 오류율, 구간 포함률·폭 보고. 합성 목표 기반임을 계속 명시.
 5. **극단 세션↔윈도우 대응표 + 사례 분류(GPS 오류/중복/휴식 포함 정상) + 사전 정의 품질 기준 민감도**: 원래 평가 집합 결과는 유지.
 6. **한 번의 명령으로 재생성되는 결과표(run_all 형태)** + 환경 기록(패키지 버전, seed, 분할 ID, 실행 명령) + 직접 구현 GBM 설정 문서화 + sklearn traceback 기록.

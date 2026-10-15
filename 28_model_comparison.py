@@ -25,6 +25,7 @@ import torch
 
 import config
 import gbt_lib as gl
+from report_notes import MACRO_NOTE
 import ridge_lib as rl
 
 _spec_m21 = importlib.util.spec_from_file_location("m21", "21_baseline_integrated_report.py")
@@ -94,7 +95,13 @@ def build_pace_by_user(user_sequences):
     """사용자별 session_order 순 avg_pace_sec_per_km 배열. session_order는 0부터 시작하는
     조밀한 시간순 인덱스라(02/17단계에서 이미 확인됨) 위치==session_order로 바로 슬라이싱 가능."""
     d = user_sequences.sort_values(["user_id", "session_order"])
-    return {uid: grp["avg_pace_sec_per_km"].to_numpy() for uid, grp in d.groupby("user_id")}
+    out = {}
+    for uid, grp in d.groupby("user_id"):
+        # 3주차 4번: 위치==session_order 전제를 assert로 검증(사용자별 0..n-1 조밀 인덱스 + 시작 시각 비감소)
+        assert (grp["session_order"].to_numpy() == np.arange(len(grp))).all(), f"session_order가 조밀하지 않음: user {uid}"
+        assert (np.diff(grp["start_time"].to_numpy()) >= 0).all(), f"session_order와 start_time 순서가 어긋남: user {uid}"
+        out[uid] = grp["avg_pace_sec_per_km"].to_numpy()
+    return out
 
 
 def last_n_median_pred(samples, pace_by_user, n):
@@ -400,6 +407,7 @@ def main():
                       b["abs_error"].mean(), np.sqrt(b["sq_error"].mean())))
     md.append("- 종합표의 **6a는 15피처(과거 5세션x3, 24단계 윈도우)**, **6b는 22피처(+이력요약 7개, 7단계 확장)** 이다. "
               "둘 다 표준화+Ridge(alpha=1e4), `ridge_lib.RidgePipeline`(numpy), 학습 구간 fit.\n")
+    md.append("- **레거시 6a(Ridge15, alpha=1e4 재사용)와 `docs/same_scope_comparison.md`의 Ridge15(자체 CV alpha=1e-4, 6단계 원본과 일치)는 서로 다른 값이다.**\n")
     for sp, m15, r15, m22, r22 in parts:
         md.append(f"- {sp}: 15피처 MAE={m15:.3f}/RMSE={r15:.3f}, 22피처 MAE={m22:.3f}/RMSE={r22:.3f}\n")
     md.append("- 6단계 문서(`docs/ridge_results.md`)의 Ridge 메인 숫자: cold-start MAE 69.928(RMSE 262.069), "
@@ -436,7 +444,7 @@ def main():
 
     hl_md = ["## 헤드라인 (확인된 사실 / 추정 구분)\n", "**확인된 사실 (이 문서의 표와 CI에서 직접 읽힌 것)**\n"]
     hl_md.append(f"- 학습 모델(GBM, MLP)은 두 평가 조건 모두에서 median-5보다 MAE가 낮고 쌍체 차이 CI가 0을 포함하지 않는다"
-                 f"(개선폭 {min(gains):.1f}~{max(gains):.1f}초/km, 4~5%). 그러나 이것만으로 끝나는 결론이 아니다:\n")
+                 f"(개선폭 {min(gains):.1f}~{max(gains):.1f}초/km, 4~5%) " + MACRO_NOTE + ". 그러나 이것만으로 끝나는 결론이 아니다:\n")
     hl_md.append("- **사후 추가 baseline (median-10, median-20, 전체 이력 중앙값, 결합 규칙 (d))은 ablation 결과를 본 뒤 추가한 것이고, "
                  "후보 4개 중 가장 좋은 것(d)을 함께 보고하는 것이라 약간의 낙관(선택 편향) 가능성이 있다.** 이 4개는 고정했고 더 추가하지 않았다.\n")
     c = hl["cold-start"]
@@ -558,8 +566,8 @@ def main():
 
     # ===== 6. 한계 =====
     md.append("\n## 6. 한계\n")
-    md.append("① **개선폭 크기**: median-5 대비 절대 개선폭은 2.5~2.9초/km(상대 4~5%) 수준으로, "
-              "통계적으로는 유의하지만 이 크기가 실제 코칭 문구를 바꿀 만큼 큰지는 별개의 "
+    md.append("① **개선폭 크기**: median-5 대비 절대 개선폭은 2.6~3.0초/km(상대 4~5%) 수준으로, "
+              "통계적으로는 유의하지만(" + MACRO_NOTE + ") 이 크기가 실제 코칭 문구를 바꿀 만큼 큰지는 별개의 "
               "판단이다(이미 6~8단계 보고에서 반복 명시).\n")
     md.append("② **극단 페이스/상위 1% 윈도우 집중**: RMSE 기준 비교의 상당 부분이 상위 1% 오차 "
               "윈도우(주로 극단 페이스)에 좌우된다(7단계 세분화 참고, SSE의 90% 이상). RMSE로 "

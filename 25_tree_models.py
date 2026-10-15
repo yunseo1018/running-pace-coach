@@ -37,6 +37,7 @@ import scipy
 
 import config
 import ridge_lib as rl
+from report_notes import MACRO_NOTE
 import gbt_lib as gl
 
 _spec_m21 = importlib.util.spec_from_file_location("m21", "21_baseline_integrated_report.py")
@@ -624,7 +625,7 @@ def main():
             mae_lo, mae_hi = np.percentile(mae_diff, [2.5, 97.5])
             mae_beats = mae_lo > 0
             md.append(f"- **MAE: median-5 - 이 모델** = {mae_diff.mean():.3f} (95% CI [{mae_lo:.3f}, {mae_hi:.3f}]) "
-                      f"-> {'0 미포함, 이 모델이 유의하게 낫음' if mae_beats else ('0 미포함, median-5가 유의하게 나음' if mae_hi < 0 else '0 포함, 유의한 차이 없음')}\n")
+                      f"-> {'0 미포함, 이 모델이 유의하게 낫음 ' + MACRO_NOTE if mae_beats else ('0 미포함, median-5가 유의하게 나음' if mae_hi < 0 else '0 포함, 유의한 차이 없음')}\n")
             rows = []
             for other in ["median5", "user_overall_avg", "recent_avg"]:
                 diff = boot_rmse[other] - boot_rmse[model_name]
@@ -718,7 +719,7 @@ def main():
     md.append("\n## 3-1. 개선폭 (CV기준 선택 모델=주 결과, 절대값/상대값/신뢰구간)\n")
     md.append("**통계적 유의성과 코칭 관점의 실용적 의미는 별개다** — 신뢰구간이 0을 포함하지 "
               "않아도(=median-5보다 통계적으로 유의하게 낫다는 뜻) 그 차이가 실제 코칭 문구를 "
-              "바꿀 만큼 큰지는 따로 판단해야 한다.\n")
+              "바꿀 만큼 큰지는 따로 판단해야 한다. 또한 이 '유의하게 낫다'는 " + MACRO_NOTE + "에 한정된 문장이다.\n")
     for split_name, df, y_true_full in [("cold-start", combined_cold_df, y_te), ("personalized", combined_pers_df, y_pte)]:
         boot_mae, _ = boot_results[split_name]
         best = cv_selected_per_split[split_name]

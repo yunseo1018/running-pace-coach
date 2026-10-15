@@ -32,6 +32,7 @@ import torch.nn as nn
 
 import config
 import gbt_lib as gl
+from report_notes import MACRO_NOTE
 
 _spec_m21 = importlib.util.spec_from_file_location("m21", "21_baseline_integrated_report.py")
 m21 = importlib.util.module_from_spec(_spec_m21)
@@ -472,7 +473,7 @@ def main():
         mae_diff_m5 = boot_mae["median5"] - boot_mae[mlp_label]
         lo_m5, hi_m5 = np.percentile(mae_diff_m5, [2.5, 97.5])
         md.append(f"- **MAE: median-5 - MLP** = {mae_diff_m5.mean():.3f} (95% CI [{lo_m5:.3f}, {hi_m5:.3f}]) "
-                  f"-> {'0 미포함, MLP가 유의하게 나음' if lo_m5 > 0 else ('0 미포함, median-5가 유의하게 나음' if hi_m5 < 0 else '0 포함, 유의한 차이 없음')}\n")
+                  f"-> {'0 미포함, MLP가 유의하게 나음 ' + MACRO_NOTE if lo_m5 > 0 else ('0 미포함, median-5가 유의하게 나음' if hi_m5 < 0 else '0 포함, 유의한 차이 없음')}\n")
 
         mae_diff_gbm = boot_mae[GBM_LABEL] - boot_mae[mlp_label]
         lo_g, hi_g = np.percentile(mae_diff_gbm, [2.5, 97.5])
@@ -541,7 +542,7 @@ def main():
          "median-5 대비 개선폭 [95% CI]": f"{d_m5.mean():.3f} [{lo1:.3f}, {hi1:.3f}]", "GBM−MLP [95% CI]": f"{d_gb.mean():.3f} [{lo2:.3f}, {hi2:.3f}]"},
     ])
     md.append(m21.df_to_markdown(sens))
-    md.append("\n\n**기록**: fold 구성이 바뀌자 선택된 구조·에폭이 달라졌고 cold-start MLP의 test MAE가 약 0.2초/km 움직였다. 두 설정 모두에서 MLP는 median-5보다 유의하게 낫고 GBM과는 구분되지 않는다(위 CI 기준). "
+    md.append("\n\n**기록**: fold 구성이 바뀌자 선택된 구조·에폭이 달라졌고 cold-start MLP의 test MAE가 약 0.2초/km 움직였다. 두 설정 모두에서 MLP는 median-5보다 유의하게 낫고 GBM과는 구분되지 않는다(위 CI 기준) " + MACRO_NOTE + ". "
               "이 0.2초/km는 하이퍼파라미터 선택이 검증 fold 구성에 민감하다는 정도를 보여주는 값이며, GBM은 같은 격자·같은 선택이 유지됐다(7단계 문서). "
               "이 변동의 원인 분해(검증 fold 데이터 차이 vs 조기종료/에폭 변화)는 하지 않았다 — **추정/미확인**.\n")
 
