@@ -1,0 +1,37 @@
+{
+  "selection_rule": "validation MAE only (cold-start: first fold of ridge_lib.group_kfold_splits(seed=CV_SEED); personalized: chronological inner split); test never used",
+  "selection_seed": 42,
+  "representative_seed": 42,
+  "final_seeds": [
+    1,
+    2,
+    3,
+    42,
+    999
+  ],
+  "torch_version": "2.14.0+cpu",
+  "splits": {
+    "cold-start": {
+      "form": "median5_residual",
+      "label": "mlp_median5_resid",
+      "n_hidden_layers": 2,
+      "width": 32,
+      "weight_decay": 0.0001,
+      "n_epochs": 112,
+      "val_mae": 56.047661203217885,
+      "val_mae_direct": 56.1797479169604,
+      "val_mae_resid": 56.047661203217885
+    },
+    "personalized": {
+      "form": "median5_residual",
+      "label": "mlp_median5_resid",
+      "n_hidden_layers": 1,
+      "width": 64,
+      "weight_decay": 0.0001,
+      "n_epochs": 142,
+      "val_mae": 51.821926217098515,
+      "val_mae_direct": 52.05573314526369,
+      "val_mae_resid": 51.821926217098515
+    }
+  }
+}

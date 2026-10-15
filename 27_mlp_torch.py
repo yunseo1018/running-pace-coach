@@ -20,6 +20,7 @@
 산출물: docs/mlp_results.md
 """
 
+import json
 import importlib.util
 import sys
 from pathlib import Path
@@ -49,6 +50,7 @@ m25 = importlib.util.module_from_spec(_spec_m25)
 _spec_m25.loader.exec_module(m25)
 
 OUTPUT_MD_PATH = Path("docs") / "mlp_results.md"
+SELECTED_JSON_PATH = Path("docs") / "mlp_selected_hyperparams.json"  # 28/29번이 읽는 선택 결과(하이퍼파라미터만)
 
 # ===== 7단계에서 이미 CV/내부검증으로 선택된(재탐색하지 않음) GBM 하이퍼파라미터 =====
 # cold-start 주 결과: 7a. 직접구현 GBM(absolute_error); personalized 주 결과: 7c. median5+잔차 GBM
@@ -219,14 +221,18 @@ def main():
 
     # ===== 0. 환경: MLPRegressor loss 제약 확인 + torch 버전/결정성 =====
     md.append("## 0. 환경\n")
-    from sklearn.neural_network import MLPRegressor
-    import inspect
-    sig = inspect.signature(MLPRegressor.__init__)
-    loss_param = sig.parameters.get("loss")
-    doc_excerpt = [line for line in MLPRegressor.__doc__.split("\n") if "loss :" in line or "squared_error" in line or "poisson" in line][:3]
-    md.append(f"- **sklearn.neural_network.MLPRegressor의 `loss` 파라미터 기본값/타입**: "
-              f"`{loss_param.default!r}` (코드 기준, `inspect.signature` 확인)\n")
-    md.append(f"- **docstring 발췌**: {' / '.join(l.strip() for l in doc_excerpt)}\n")
+    try:  # 진단 기록 전용: 실패해도 결과 수치 경로(torch MLP)에는 영향 없음
+        from sklearn.neural_network import MLPRegressor
+        import inspect
+        sig = inspect.signature(MLPRegressor.__init__)
+        loss_param = sig.parameters.get("loss")
+        doc_excerpt = [line for line in MLPRegressor.__doc__.split("\n") if "loss :" in line or "squared_error" in line or "poisson" in line][:3]
+        md.append(f"- **sklearn.neural_network.MLPRegressor의 `loss` 파라미터 기본값/타입**: "
+                  f"`{loss_param.default!r}` (코드 기준, `inspect.signature` 확인)\n")
+        md.append(f"- **docstring 발췌**: {' / '.join(l.strip() for l in doc_excerpt)}\n")
+    except ImportError as e:
+        md.append(f"- (진단 생략) 이번 실행에서 sklearn import 실패(`{str(e)[:100]}`)로 MLPRegressor 코드 확인을 다시 하지 않았다. "
+                  "이전 실행에서의 확인 결과(sklearn 1.9.1): `loss`는 'squared_error'/'poisson'만 지원.\n")
     md.append("- **확인됨**: MLPRegressor는 `loss ∈ {'squared_error', 'poisson'}`만 지원하고 "
               "**L1(절대오차) 손실 옵션이 없다.** 그래서 메인 모델에 쓰지 않고, torch로 직접 "
               "L1Loss 기반 MLP를 구현했다.\n")
@@ -270,8 +276,8 @@ def main():
 
     # ===== 2~3. 하이퍼파라미터 선택 (검증 MAE만, 테스트 안 봄) =====
     print("\ncold-start 검증 분할 준비 중...")
-    from sklearn.model_selection import GroupKFold as SkGroupKFold
-    tr_idx, val_idx = next(iter(SkGroupKFold(n_splits=m25.N_FOLDS).split(X_tr, y_tr, groups=uid_tr)))
+    import ridge_lib as _rl  # GroupKFold도 ridge_lib 고정(sklearn 미사용)
+    tr_idx, val_idx = next(iter(_rl.group_kfold_splits(uid_tr, m25.N_FOLDS, m25.CV_SEED)))
     X_fit_cold, y_fit_cold = X_tr[tr_idx], y_tr[tr_idx]
     X_val_cold, y_val_cold = X_tr[val_idx], y_tr[val_idx]
     med_fit_cold = m25.median5_from_X(X_fit_cold)
@@ -355,6 +361,27 @@ def main():
         mlp_cv_selected[split_name] = DIRECT_LABEL if direct_val_mae <= resid_val_mae else RESID_LABEL
         print(f"  {split_name} MLP 주 결과(검증 MAE 기준): {mlp_cv_selected[split_name]} "
               f"(direct_val={direct_val_mae:.3f}, resid_val={resid_val_mae:.3f})")
+
+    # 28/29번이 읽는 선택 결과 저장(하이퍼파라미터만: 사용자 ID·행별 예측 없음, git 추적 대상).
+    # 선택 규칙: ridge_lib GroupKFold(cold-start, 첫 fold를 검증으로) / 시간순 inner-split(personalized)의 검증 MAE. 테스트 점수는 선택에 쓰지 않음.
+    selected_json = {
+        "selection_rule": "validation MAE only (cold-start: first fold of ridge_lib.group_kfold_splits(seed=CV_SEED); "
+                          "personalized: chronological inner split); test never used",
+        "selection_seed": SELECTION_SEED, "representative_seed": 42, "final_seeds": FINAL_SEEDS,
+        "torch_version": torch.__version__, "splits": {},
+    }
+    for split_name in ["cold-start", "personalized"]:
+        form = mlp_cv_selected[split_name]
+        p_sel, v_sel, e_sel = selection_results[(split_name, form)]
+        selected_json["splits"][split_name] = {
+            "form": "median5_residual" if form == RESID_LABEL else "direct", "label": form,
+            "n_hidden_layers": p_sel["n_hidden_layers"], "width": p_sel["width"],
+            "weight_decay": p_sel["weight_decay"], "n_epochs": int(e_sel), "val_mae": float(v_sel),
+            "val_mae_direct": float(selection_results[(split_name, DIRECT_LABEL)][1]),
+            "val_mae_resid": float(selection_results[(split_name, RESID_LABEL)][1]),
+        }
+    SELECTED_JSON_PATH.write_text(json.dumps(selected_json, indent=2, ensure_ascii=False), encoding="utf-8")
+    print("선택 결과 저장:", SELECTED_JSON_PATH)
 
     md.append("\n**MLP 두 형태 중 주 결과(검증 MAE 기준)**: "
               f"cold-start=`{MLP_LABELS[mlp_cv_selected['cold-start']]}`, "
@@ -490,6 +517,33 @@ def main():
     md.append("\n**MAE와 RMSE 결론을 따로 서술**: 위 쌍체 차이 표의 RMSE 비교가 MAE 비교와 "
               "다를 수 있다 — RMSE는 상위 오차 윈도우(극단 페이스 등)에 민감한 지표이므로 "
               "MAE 기준 결론과 RMSE 기준 결론을 섞어서 읽지 않는다.\n")
+
+    # ===== 6. 분할기 변경에 따른 민감도 =====
+    md.append("\n## 6. 분할기 변경에 따른 민감도 (cold-start 검증 fold 구성)\n")
+    md.append("cold-start의 하이퍼파라미터 선택은 train 사용자 5-fold GroupKFold의 첫 fold를 검증으로 쓴다. 이 fold 구성은 분할기에 따라 다르다: "
+              "처음 실행(커밋 00c27d1)은 sklearn GroupKFold(그룹 크기 기반 결정적 분할), 재현성 고정 후에는 ridge_lib의 GroupKFold(시드 42 셔플 후 균등분할). "
+              "**둘 다 같은 사용자가 fold 양쪽에 걸치지 않는 유효한 CV 선택이며, 어느 쪽이 더 낫다고 판단하지 않는다.** 아래는 같은 코드·같은 격자에서 fold 구성만 바뀐 효과다 "
+              "(personalized는 시간순 분할이라 영향 없음, 값 불변).\n\n")
+    cur_final = final_models[("cold-start", RESID_LABEL)]
+    cur_rep_mae = float(np.mean(np.abs(y_te - cur_final["rep_pred"])))
+    b_mae, b_rmse = boot_results["cold-start"]
+    d_m5 = b_mae["median5"] - b_mae[RESID_LABEL]
+    d_gb = b_mae[GBM_LABEL] - b_mae[RESID_LABEL]
+    lo1, hi1 = np.percentile(d_m5, [2.5, 97.5])
+    lo2, hi2 = np.percentile(d_gb, [2.5, 97.5])
+    p_cur = cur_final["params"]
+    sens = pd.DataFrame([
+        {"분할기": "sklearn GroupKFold (커밋 00c27d1 시점, 문서 기록값)", "선택 하이퍼파라미터": "{'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0}, 에폭 97",
+         "test MAE(대표 시드 42)": "59.578", "5시드 평균±표준편차": "59.514±0.050",
+         "median-5 대비 개선폭 [95% CI]": "2.661 [1.865, 3.535]", "GBM−MLP [95% CI]": "0.104 [-0.560, 0.941]"},
+        {"분할기": "ridge_lib GroupKFold (현재, 고정)", "선택 하이퍼파라미터": f"{p_cur}, 에폭 {cur_final['n_epochs']}",
+         "test MAE(대표 시드 42)": f"{cur_rep_mae:.3f}", "5시드 평균±표준편차": f"{np.mean(cur_final['seed_maes']):.3f}±{np.std(cur_final['seed_maes']):.3f}",
+         "median-5 대비 개선폭 [95% CI]": f"{d_m5.mean():.3f} [{lo1:.3f}, {hi1:.3f}]", "GBM−MLP [95% CI]": f"{d_gb.mean():.3f} [{lo2:.3f}, {hi2:.3f}]"},
+    ])
+    md.append(m21.df_to_markdown(sens))
+    md.append("\n\n**기록**: fold 구성이 바뀌자 선택된 구조·에폭이 달라졌고 cold-start MLP의 test MAE가 약 0.2초/km 움직였다. 두 설정 모두에서 MLP는 median-5보다 유의하게 낫고 GBM과는 구분되지 않는다(위 CI 기준). "
+              "이 0.2초/km는 하이퍼파라미터 선택이 검증 fold 구성에 민감하다는 정도를 보여주는 값이며, GBM은 같은 격자·같은 선택이 유지됐다(7단계 문서). "
+              "이 변동의 원인 분해(검증 fold 데이터 차이 vs 조기종료/에폭 변화)는 하지 않았다 — **추정/미확인**.\n")
 
     OUTPUT_MD_PATH.write_text("".join(md), encoding="utf-8")
     print(f"\n최종 저장 완료: {OUTPUT_MD_PATH.resolve()}")

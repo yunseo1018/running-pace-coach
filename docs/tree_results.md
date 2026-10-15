@@ -2,17 +2,16 @@
 
 입력 메인 데이터: `data\run_sessions_deduped_merged.pkl` (세션 105709건, 사용자 854명, assert 통과)
 
-## 0. 환경 확인 + ridge_lib vs sklearn 대조
+## 0. 환경 확인 + ridge_lib 고정 사용 (sklearn 대조는 진단용)
 - python: 3.14.7
-- numpy: 2.5.3, scipy: 1.18.1, sklearn: 1.9.1, pandas: 3.0.6
-- **Ridge 대조**(합성 데이터 n=300,p=22,alpha=1.0): 계수 최대차이=8.88e-16, intercept 차이=0.00e+00, 예측값 최대차이=5.33e-15 -> **일치** (<1e-6 기준)
-- **GroupKFold 대조**(같은 데이터, 5-fold): fold간 그룹 겹침 — sklearn=0, 수동구현=0 (둘 다 0이어야 함, 통과). fold별 그룹 수 — sklearn: [10, 10, 10, 9, 10], 수동: [10, 10, 10, 10, 9]. **fold 멤버십이 완전히 같은가 = False** (sklearn GroupKFold는 shuffle/random_state 옵션이 없고 그룹 크기 기반 결정적 알고리즘이라 수동 구현(랜덤 셔플 후 균등분할)과 멤버십이 다를 수 있음 — 완전 일치는 기대 범위 밖이고, **둘 다 겹침 0이면 구조적으로 올바른 분할**로 판단한다.)
-- **Huber 정성 비교**(정의가 달라 수치 일치는 기대 안 함 — sklearn은 epsilon 기반, scale을 반복마다 재추정; ridge_lib은 초기 OLS 잔차 MAD로 delta 1회 고정): 계수 상관계수=1.000, 부호 일치 비율=100.0%
-
-**게이트 판정**: Ridge 수치 일치 + GroupKFold 구조적 정합(겹침 0) 모두 만족 = **True** -> 이후 모델은 sklearn Pipeline 기반으로 진행, ridge_lib.py는 검증용으로만 유지.
+- **Ridge / GroupKFold / 표준화(scaler)는 항상 `ridge_lib.py`(numpy 직접 구현: `RidgePipeline`, `group_kfold_splits`, `ManualStandardScaler`)를 쓴다. sklearn import 성공 여부와 무관하다.** (이전 버전은 sklearn Pipeline/GroupKFold를 썼다 — 아래 '고정 전후' 주석 참고.)
+- 아래 sklearn 대조는 진단 기록용이다. sklearn이 이번 실행에서 import되지 않으면 대조만 생략된다.
+- numpy: 2.5.3, scipy: 1.18.1, pandas: 3.0.6
+- **ridge_lib 자체 검증**: GroupKFold 수동구현 fold간 그룹 겹침=0(0이어야 함, 통과), fold별 그룹 수=[10, 10, 10, 10, 9]
+- **sklearn 대조 생략(진단 전용)**: 이번 실행에서 sklearn import 실패(`DLL load failed while importing _pava_pybind: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`). 결과 수치에는 영향 없음(모든 모델이 ridge_lib/gbt_lib). 과거 실행에서의 대조 결과는 이 문서의 이전 커밋 버전 참고(Ridge 계수 최대차이 8.88e-16, GroupKFold 겹침 0, fold 멤버십은 sklearn과 다름).
 
 ### 0-1. 추가 발견: sklearn.tree 차단(간헐적) -> gbt_lib.py로 직접 구현 고정 사용
-- 이번 실행에서 `from sklearn.ensemble import HistGradientBoostingRegressor` **성공**.
+- 이번 실행에서 `from sklearn.ensemble import HistGradientBoostingRegressor` **실패**: `ImportError: DLL load failed while importing _pava_pybind: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`
 - **중요(간헐적 현상 발견)**: sklearn.tree의 import 성공 여부가 **실행마다 달라진다** — 처음 발견했을 때는 3회 재시도 모두 실패했고(DecisionTree/RandomForest/GradientBoosting/HistGradientBoosting 전부), 이번 보완 작업 중 재확인하니 성공하는 경우도 나왔다(원인 미확인 — Windows Application Control Policy의 캐시/타이밍 문제로 추정하나 검증 안 함). lightgbm/xgboost는 여전히 미설치·설치 금지.
 - **그래서 이번 실행의 import 성공 여부와 무관하게, 코드가 항상 `gbt_lib.py`(numpy 직접구현)를 쓰도록 고정했다** — 사용자 확인을 받고 이미 커밋된(690b93f) 방식을 그대로 유지해 실행마다 결과가 달라지는 것을 막는다(실제로 이 고정을 하기 전, sklearn이 우연히 import된 회차에서 real sklearn HistGradientBoostingRegressor가 조용히 쓰여 수치가 미세하게 달라지는 재현성 문제를 직접 겪었다).
   - gbt_lib 자체 검증(squared_error): 학습손실 791.574 -> 13.082, 반복마다 단조감소=True (최대 증가분 -7.40e-02)
@@ -55,18 +54,18 @@ personalized는 '제외 3 / 추가 1'로 숫자가 안 맞는 것처럼 보이�
 ## 2. 모델
 
 ### (a) Ridge (확장 피처)
-- cold-start: GroupKFold(5-fold) CV MAE 최소 alpha = **10000.0** (0.0001=58.080, 0.001=58.080, 0.01=58.080, 0.1=58.080, 1.0=58.080, 10.0=58.075, 100.0=58.035, 1000.0=57.847, 10000.0=57.597, 100000.0=59.433)
+- cold-start: GroupKFold(5-fold) CV MAE 최소 alpha = **10000.0** (0.0001=58.244, 0.001=58.244, 0.01=58.244, 0.1=58.244, 1.0=58.243, 10.0=58.238, 100.0=58.194, 1000.0=57.969, 10000.0=57.626, 100000.0=59.488)
 - personalized: 시간순 inner-split(train 64547/val 16471) MAE 최소 alpha = **10000.0** (0.0001=58.110, 0.001=58.110, 0.01=58.110, 0.1=58.110, 1.0=58.110, 10.0=58.110, 100.0=58.104, 1000.0=58.066, 10000.0=58.018, 100000.0=60.552)
 
 ### (b) gbt_lib.SimpleGradientBoostingRegressor(numpy 직접구현, 고정 사용 — 0-1 참고)
 - 격자(사전 고정, 결과 보고 안 바꿈): learning_rate∈[0.03,0.1], max_iter∈[100,300], max_depth∈[2,3] (총 8개 조합), min_samples_leaf=20 고정, n_bins=32 고정.
-- cold-start 선택: **{'learning_rate': 0.1, 'max_iter': 300, 'max_depth': 3}** (CV MAE=50.257)
+- cold-start 선택: **{'learning_rate': 0.1, 'max_iter': 300, 'max_depth': 3}** (CV MAE=50.239)
 - personalized 선택: **{'learning_rate': 0.1, 'max_iter': 300, 'max_depth': 3}** (inner-val MAE=52.800)
 
 - squared_error 참고 1행: 독립적으로 재탐색하지 않고, absolute_error에서 선택된 하이퍼파라미터를 그대로 쓰고 loss만 squared_error로 바꿔 적합한 참고용 결과다 (튜닝 기준은 여전히 MAE가 아니라 "같은 설정에서 손실만 바꿔보기").
 
 ### (c) median5 + 잔차 학습 (y - median5를 absolute_error로 학습, 예측 = median5 + 잔차예측)
-- cold-start 선택: **{'learning_rate': 0.1, 'max_iter': 300, 'max_depth': 3}** (CV MAE=50.712)
+- cold-start 선택: **{'learning_rate': 0.1, 'max_iter': 300, 'max_depth': 3}** (CV MAE=50.640)
 - personalized 선택: **{'learning_rate': 0.1, 'max_iter': 300, 'max_depth': 3}** (inner-val MAE=51.754)
 
 ## 3. 평가
@@ -133,9 +132,9 @@ personalized는 '제외 3 / 추가 1'로 숫자가 안 맞는 것처럼 보이�
 #### cold-start
 | 방법 | CV/내부검증 MAE | 테스트 MAE |
 |---|---|---|
-| 6. Ridge(확장피처) | 57.597 | 65.681 |
-| 7a. 직접구현 GBM(absolute_error) | 50.257 | 59.664 |
-| 7c. median5+잔차 직접구현 GBM | 50.712 | 59.473 |
+| 6. Ridge(확장피처) | 57.626 | 65.681 |
+| 7a. 직접구현 GBM(absolute_error) | 50.239 | 59.664 |
+| 7c. median5+잔차 직접구현 GBM | 50.640 | 59.473 |
 - **CV/내부검증 기준 선택(주 결과)**: `7a. 직접구현 GBM(absolute_error)`
 - **테스트 기준 최고**: `7c. median5+잔차 직접구현 GBM` (**CV기준과 다름 — 사후에 테스트 점수로 골랐다면 이 모델을 선택했을 것이다. 아래에 낙관적 편향 예시로만 같이 표시**)
 
@@ -264,21 +263,23 @@ personalized는 '제외 3 / 추가 1'로 숫자가 안 맞는 것처럼 보이�
 ## 3-2. Permutation Importance (CV기준 선택 모델, 검증 구간 기준, 상위 10개)
 검증 구간: cold-start는 train을 다시 GroupKFold(5-fold)해서 **1개 fold를 held-out 검증셋으로, 나머지 4개로 재학습**(테스트는 건드리지 않음); personalized는 이미 쓰던 시간순 inner-split의 inner-val을 그대로 쓴다. 지표는 MAE 증가량(섞었을 때 나빠지는 정도, 10회 반복 평균).
 
-#### cold-start — 7a. 직접구현 GBM(absolute_error) (검증셋 n=15934, 기준 MAE=46.560)
+#### cold-start — 7a. 직접구현 GBM(absolute_error) (검증셋 n=15509, 기준 MAE=55.814)
 | 피처 | MAE 증가량(중요도) | 표준편차 | 7단계 신규 피처 |
 |---|---|---|---|
-| user_history_median_pace | 8.032 | 0.096 | Y |
-| median_past5_elapsed_pace | 3.389 | 0.062 | Y |
-| median_past5_moving_pace | 2.038 | 0.071 | Y |
-| past[4].actual_distance_km | 1.086 | 0.027 |  |
-| days_since_last_session | 0.974 | 0.045 | Y |
-| past[4].avg_pace_sec_per_km | 0.680 | 0.028 |  |
-| past[3].avg_pace_sec_per_km | 0.475 | 0.039 |  |
-| past[2].avg_pace_sec_per_km | 0.210 | 0.030 |  |
-| cumulative_session_count | 0.100 | 0.010 | Y |
-| past[1].avg_pace_sec_per_km | 0.070 | 0.015 |  |
-- **확인된 것**: 상위 10위 안에 7단계 신규 피처 5개가 포함됨(user_history_median_pace, median_past5_elapsed_pace, median_past5_moving_pace, days_since_last_session, cumulative_session_count).
+| user_history_median_pace | 8.645 | 0.092 | Y |
+| median_past5_elapsed_pace | 1.919 | 0.049 | Y |
+| median_past5_moving_pace | 1.877 | 0.052 | Y |
+| past[4].avg_pace_sec_per_km | 0.555 | 0.023 |  |
+| past[3].avg_pace_sec_per_km | 0.409 | 0.015 |  |
+| days_since_last_session | 0.407 | 0.018 | Y |
+| past[2].avg_pace_sec_per_km | 0.256 | 0.014 |  |
+| past[4].actual_distance_km | 0.238 | 0.027 |  |
+| past5_pace_mad | 0.105 | 0.017 | Y |
+| past[1].avg_pace_sec_per_km | 0.098 | 0.015 |  |
+- **확인된 것**: 상위 10위 안에 7단계 신규 피처 5개가 포함됨(user_history_median_pace, median_past5_elapsed_pace, median_past5_moving_pace, days_since_last_session, past5_pace_mad).
 - **추정/미확인**: 신규 피처가 상위권에 있다는 사실만으로 'median-5 대비 개선이 이 피처들 때문'이라고 인과적으로 결론 내릴 수 없다 — 그러려면 신규 피처를 뺀 ablation 모델이 필요한데 이번 요청 범위에서는 만들지 않았다. 아래는 **미확인**으로만 남긴다: 개선의 몇 %가 새 피처 덕분인지.
+
+- **분할기 고정에 따른 변경(기록)**: 이전 실행(sklearn GroupKFold)의 cold-start 검증 fold에서는 상위 10위에 `cumulative_session_count`(중요도 0.100)가 있었으나, ridge_lib GroupKFold로 고정한 뒤의 검증 fold에서는 `past5_pace_mad`(0.105)로 바뀌었다. 상위 3위(user_history_median_pace, median_past5_elapsed_pace, median_past5_moving_pace)는 같지만 값이 달라졌다(예: user_history_median_pace 8.032→8.645, median_past5_elapsed_pace 3.389→1.919, days_since_last_session 0.974→0.407). 하위권 순위는 검증 fold 구성에 민감하다. 원인(검증 fold 데이터 차이)은 분해하지 않았다 — **추정/미확인**. personalized는 시간순 검증이라 변화 없음.
 
 #### personalized — 7c. median5+잔차 직접구현 GBM (검증셋 n=16471, 기준 MAE=51.754)
 | 피처 | MAE 증가량(중요도) | 표준편차 | 7단계 신규 피처 |
@@ -419,7 +420,7 @@ personalized는 '제외 3 / 추가 1'로 숫자가 안 맞는 것처럼 보이�
 
 ## 7. 환경 확인 (8단계 사전 체크용, 설치/변경 없음 — 8단계 시작은 사용자 결정 대기)
 - `import torch`: **성공** (version=2.14.0+cpu)
-- `from sklearn.neural_network import MLPRegressor`: **성공**
-- `from sklearn.linear_model import QuantileRegressor`: **성공**
+- `from sklearn.neural_network import MLPRegressor`: **실패** `ImportError: DLL load failed while importing _qmvnt_cy: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`
+- `from sklearn.linear_model import QuantileRegressor`: **실패** `ImportError: DLL load failed while importing _rank_filter_1d: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`
 
 8단계(MLP) 진행 여부는 사용자가 이 결과를 보고 결정한다 — 이번 커밋에서 8단계는 시작하지 않는다.

@@ -42,7 +42,6 @@ PRED_NAMES = {"median5": "median-5", "hist_median": "전체이력중앙값", "bl
 N_BOOT = 2000
 BOOT_SEED = 42
 DIST_COLS = [0, 3, 6, 9, 12]  # X의 past[i].actual_distance_km 위치(PAST_FEATURE_COLUMNS 순서 기준)
-KNOWN_MAE = {"cold-start": {"gbm": 59.664, "mlp": 59.578}, "personalized": {"gbm": 53.600, "mlp": 53.485}}
 
 
 def predict_all_models(train_samples, test_samples, split):
@@ -60,15 +59,21 @@ def predict_all_models(train_samples, test_samples, split):
         gbm.fit(X_tr, y_tr - med_tr)
         gbm_pred = med_te + gbm.predict(X_te)
         mp, ep = m28.MLP_PERS_PARAMS, m28.MLP_PERS_EPOCHS
-    model, scaler = m27.train_mlp_fixed_epochs(X_tr, y_tr - med_tr, mp["n_hidden_layers"], mp["width"],
-                                               mp["weight_decay"], m28.MLP_SEED, ep)
-    mlp_pred = med_te + m27.predict_mlp(model, scaler, X_te)
+    form = m28.MLP_COLD_FORM if split == "cold-start" else m28.MLP_PERS_FORM  # 27번이 저장한 선택 결과(JSON)
+    resid = form == "median5_residual"
+    model, scaler = m27.train_mlp_fixed_epochs(X_tr, (y_tr - med_tr) if resid else y_tr, mp["n_hidden_layers"],
+                                               mp["width"], mp["weight_decay"], m28.MLP_SEED, ep)
+    mlp_pred = (med_te if resid else 0.0) + m27.predict_mlp(model, scaler, X_te)
     preds = {"median5": med_te, "hist_median": hist_te, "blend": 0.5 * med_te + 0.5 * hist_te,
              "gbm": gbm_pred, "mlp": mlp_pred}
     # 28단계 보고 수치와 일치하는지 확인(재현성)
-    for k in ["gbm", "mlp"]:
+    # GBM은 고정값, MLP는 27번 선택 결과를 따르므로 docs/model_comparison.md(28번 산출)의 같은 행과 대조한다.
+    import re
+    doc = (Path("docs") / "model_comparison.md").read_text(encoding="utf-8")
+    for k, row_name in [("gbm", "7. 직접구현 GBM(주결과)"), ("mlp", "8. MLP(주결과)")]:
         mae = float(np.mean(np.abs(y_te - preds[k])))
-        assert abs(mae - KNOWN_MAE[split][k]) < 0.001, (split, k, mae)
+        m = re.search(r"\| " + re.escape(row_name) + r" \| " + split + r" \| ([0-9.]+) \|", doc)
+        assert m and abs(mae - float(m.group(1))) < 0.001, (split, k, mae, m and m.group(1))
     return preds
 
 

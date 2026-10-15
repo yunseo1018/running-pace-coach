@@ -3,8 +3,7 @@
 입력 메인 데이터: `data\run_sessions_deduped_merged.pkl` (세션 105709건, 사용자 854명, assert 통과)
 
 ## 0. 환경
-- **sklearn.neural_network.MLPRegressor의 `loss` 파라미터 기본값/타입**: `'squared_error'` (코드 기준, `inspect.signature` 확인)
-- **docstring 발췌**: loss : {'squared_error', 'poisson'}, default='squared_error' / "squared error" and "poisson" losses actually implement / "half squares error" and "half poisson deviance" to simplify the
+- (진단 생략) 이번 실행에서 sklearn import 실패(`DLL load failed while importing _minpack: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`)로 MLPRegressor 코드 확인을 다시 하지 않았다. 이전 실행에서의 확인 결과(sklearn 1.9.1): `loss`는 'squared_error'/'poisson'만 지원.
 - **확인됨**: MLPRegressor는 `loss ∈ {'squared_error', 'poisson'}`만 지원하고 **L1(절대오차) 손실 옵션이 없다.** 그래서 메인 모델에 쓰지 않고, torch로 직접 L1Loss 기반 MLP를 구현했다.
 - torch: 2.14.0+cpu, numpy: 2.5.3
 - **결정성 설정**: 각 학습 전 `torch.manual_seed(seed)`를 호출한다. CPU 전용 실행(torch 2.14.0+cpu, GPU 미사용)이며, `torch.use_deterministic_algorithms`는 강제하지 않았다(의도적으로 시드 간 실제 변동을 관찰하기 위함 — 4번 참고). 데이터 순서 셔플(`torch.randperm`)도 `manual_seed`에 종속된다.
@@ -25,28 +24,28 @@
 **8a. MLP(직접 예측, L1)**:
 | 조합 | 검증 MAE | 선택된 에폭 |
 |---|---|---|
-| {'n_hidden_layers': 1, 'width': 32, 'weight_decay': 0.0} | 50.598 | 200 |
-| {'n_hidden_layers': 1, 'width': 32, 'weight_decay': 0.0001} | 50.186 | 200 |
-| {'n_hidden_layers': 1, 'width': 64, 'weight_decay': 0.0} | 48.602 | 199 |
-| {'n_hidden_layers': 1, 'width': 64, 'weight_decay': 0.0001} | 48.564 | 199 |
-| {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0} | 47.728 | 134 |
-| {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0001} | 47.897 | 141 |
-| {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0} | 48.263 | 77 |
-| {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0001} | 47.957 | 89 |
-- 선택: **{'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0}**, 검증 MAE=47.728, 에폭=134
+| {'n_hidden_layers': 1, 'width': 32, 'weight_decay': 0.0} | 57.054 | 199 |
+| {'n_hidden_layers': 1, 'width': 32, 'weight_decay': 0.0001} | 57.339 | 200 |
+| {'n_hidden_layers': 1, 'width': 64, 'weight_decay': 0.0} | 56.446 | 199 |
+| {'n_hidden_layers': 1, 'width': 64, 'weight_decay': 0.0001} | 56.470 | 199 |
+| {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0} | 56.360 | 112 |
+| {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0001} | 56.349 | 112 |
+| {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0} | 56.180 | 131 |
+| {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0001} | 56.237 | 86 |
+- 선택: **{'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0}**, 검증 MAE=56.180, 에폭=131
 
 **8b. MLP(median5+잔차, L1)**:
 | 조합 | 검증 MAE | 선택된 에폭 |
 |---|---|---|
-| {'n_hidden_layers': 1, 'width': 32, 'weight_decay': 0.0} | 47.354 | 173 |
-| {'n_hidden_layers': 1, 'width': 32, 'weight_decay': 0.0001} | 47.363 | 153 |
-| {'n_hidden_layers': 1, 'width': 64, 'weight_decay': 0.0} | 47.396 | 83 |
-| {'n_hidden_layers': 1, 'width': 64, 'weight_decay': 0.0001} | 47.285 | 177 |
-| {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0} | 47.256 | 118 |
-| {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0001} | 47.203 | 118 |
-| {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0} | 47.195 | 97 |
-| {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0001} | 47.226 | 80 |
-- 선택: **{'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0}**, 검증 MAE=47.195, 에폭=97
+| {'n_hidden_layers': 1, 'width': 32, 'weight_decay': 0.0} | 56.151 | 196 |
+| {'n_hidden_layers': 1, 'width': 32, 'weight_decay': 0.0001} | 56.151 | 200 |
+| {'n_hidden_layers': 1, 'width': 64, 'weight_decay': 0.0} | 56.120 | 199 |
+| {'n_hidden_layers': 1, 'width': 64, 'weight_decay': 0.0001} | 56.118 | 197 |
+| {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0} | 56.092 | 112 |
+| {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0001} | 56.048 | 112 |
+| {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0} | 56.107 | 54 |
+| {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0001} | 56.102 | 54 |
+- 선택: **{'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0001}**, 검증 MAE=56.048, 에폭=112
 
 #### personalized
 
@@ -81,11 +80,11 @@
 
 #### cold-start
 
-**8a. MLP(직접 예측, L1)** (하이퍼파라미터={'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0}, 에폭=134): 시드별 test MAE=[59.489, 59.594, 59.638, 59.648, 59.527]
-- **평균=59.579, 표준편차=0.062** (대표 시드=42를 이하 통합표/CI에 사용)
+**8a. MLP(직접 예측, L1)** (하이퍼파라미터={'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0}, 에폭=131): 시드별 test MAE=[59.577, 59.6, 59.669, 59.582, 59.612]
+- **평균=59.608, 표준편차=0.033** (대표 시드=42를 이하 통합표/CI에 사용)
 
-**8b. MLP(median5+잔차, L1)** (하이퍼파라미터={'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0}, 에폭=97): 시드별 test MAE=[59.541, 59.517, 59.508, 59.578, 59.425]
-- **평균=59.514, 표준편차=0.050** (대표 시드=42를 이하 통합표/CI에 사용)
+**8b. MLP(median5+잔차, L1)** (하이퍼파라미터={'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0001}, 에폭=112): 시드별 test MAE=[59.484, 59.223, 59.444, 59.374, 59.371]
+- **평균=59.379, 표준편차=0.089** (대표 시드=42를 이하 통합표/CI에 사용)
 
 #### personalized
 
@@ -110,8 +109,8 @@
 | 4. 사용자 전체 평균 | 68.771 | 261.865 | 149 | 21977 | 4187 |
 | 5. 단순 선형 추세 | 94.244 | 337.516 | 149 | 21977 | 4187 |
 | 7단계 주결과 GBM(gbt_lib) | 59.664 | 284.865 | 149 | 21977 | 4187 |
-| 8a. MLP(직접 예측, L1) | 59.648 | 269.485 | 149 | 21977 | 4187 |
-| 8b. MLP(median5+잔차, L1) | 59.578 | 270.778 | 149 | 21977 | 4187 |
+| 8a. MLP(직접 예측, L1) | 59.582 | 270.858 | 149 | 21977 | 4187 |
+| 8b. MLP(median5+잔차, L1) | 59.374 | 270.872 | 149 | 21977 | 4187 |
 
 #### personalized
 | 방법 | MAE(초/km) | RMSE(초/km) | #users | #eval sessions | #merges |
@@ -136,8 +135,8 @@
 | 4. 사용자 전체 평균 | 69.230 | 54.860 | 87.293 | 258.877 | 157.533 | 363.271 |
 | 5. 단순 선형 추세 | 94.822 | 77.362 | 117.675 | 333.886 | 209.692 | 464.977 |
 | 7단계 주결과 GBM(gbt_lib) | 59.984 | 48.193 | 75.706 | 280.085 | 157.942 | 404.053 |
-| 8a. MLP(직접 예측, L1) | 59.960 | 48.584 | 75.190 | 265.626 | 156.092 | 378.635 |
-| 8b. MLP(median5+잔차, L1) | 59.881 | 48.540 | 74.964 | 266.809 | 156.372 | 380.675 |
+| 8a. MLP(직접 예측, L1) | 59.892 | 48.562 | 75.064 | 266.918 | 156.472 | 379.840 |
+| 8b. MLP(median5+잔차, L1) | 59.681 | 48.333 | 74.779 | 266.933 | 156.274 | 379.761 |
 
 #### personalized
 | 방법 | MAE | MAE_95%CI_하한 | MAE_95%CI_상한 | RMSE | RMSE_95%CI_하한 | RMSE_95%CI_상한 |
@@ -154,9 +153,9 @@
 ### 쌍체 차이 95% CI (MLP 주 결과 vs median-5, vs 7단계 GBM)
 
 #### cold-start — MLP 주 결과: 8b. MLP(median5+잔차, L1)
-- **MAE: median-5 - MLP** = 2.661 (95% CI [1.865, 3.535]) -> 0 미포함, MLP가 유의하게 나음
-- **MAE: GBM - MLP** = 0.104 (95% CI [-0.560, 0.941]) -> 0 포함, 유의한 차이 없음
-- **RMSE: GBM - MLP** = 13.276 (95% CI [0.382, 25.482]) -> 0 미포함, MLP가 유의하게 나음 (**주의: CI 하한 0.382이 0에 매우 가깝고 구간 폭이 25.1로 넓다** — 통계적으로는 유의하지만 경계선에 걸쳐 있다는 점을 같이 봐야 한다)
+- **MAE: median-5 - MLP** = 2.861 (95% CI [2.178, 3.597]) -> 0 미포함, MLP가 유의하게 나음
+- **MAE: GBM - MLP** = 0.304 (95% CI [-0.361, 1.203]) -> 0 포함, 유의한 차이 없음
+- **RMSE: GBM - MLP** = 13.152 (95% CI [0.869, 26.030]) -> 0 미포함, MLP가 유의하게 나음 (**주의: CI 하한 0.869이 0에 매우 가깝고 구간 폭이 25.2로 넓다** — 통계적으로는 유의하지만 경계선에 걸쳐 있다는 점을 같이 봐야 한다)
   - 이 RMSE 차이의 원인(예: GBM이 극단 페이스 윈도우에 더 민감한지)은 별도로 검증하지 않았다 — **추정/미확인**으로만 남긴다.
 
 #### personalized — MLP 주 결과: 8b. MLP(median5+잔차, L1)
@@ -165,7 +164,17 @@
 - **RMSE: GBM - MLP** = 7.392 (95% CI [-3.803, 20.858]) -> 0 포함, 유의한 차이 없음
 
 ## 5. 해석
-- **cold-start**: MLP(8b. MLP(median5+잔차, L1))가 7단계 GBM을 MAE 신뢰구간 밖에서 **이기지 못함**. (diff 95% CI [-0.560,0.941]) 원인은 **추정/미확인**이다(가능성: 이 피처셋에서는 트리 기반 비선형 분할이 MLP의 매끄러운 함수 근사보다 유리할 수 있음, 또는 하이퍼파라미터 격자가 충분히 넓지 않았을 수 있음 — 둘 다 검증 안 함).
+- **cold-start**: MLP(8b. MLP(median5+잔차, L1))가 7단계 GBM을 MAE 신뢰구간 밖에서 **이기지 못함**. (diff 95% CI [-0.361,1.203]) 원인은 **추정/미확인**이다(가능성: 이 피처셋에서는 트리 기반 비선형 분할이 MLP의 매끄러운 함수 근사보다 유리할 수 있음, 또는 하이퍼파라미터 격자가 충분히 넓지 않았을 수 있음 — 둘 다 검증 안 함).
 - **personalized**: MLP(8b. MLP(median5+잔차, L1))가 7단계 GBM을 MAE 신뢰구간 밖에서 **이기지 못함**. (diff 95% CI [-0.433,0.806]) 원인은 **추정/미확인**이다(가능성: 이 피처셋에서는 트리 기반 비선형 분할이 MLP의 매끄러운 함수 근사보다 유리할 수 있음, 또는 하이퍼파라미터 격자가 충분히 넓지 않았을 수 있음 — 둘 다 검증 안 함).
 
 **MAE와 RMSE 결론을 따로 서술**: 위 쌍체 차이 표의 RMSE 비교가 MAE 비교와 다를 수 있다 — RMSE는 상위 오차 윈도우(극단 페이스 등)에 민감한 지표이므로 MAE 기준 결론과 RMSE 기준 결론을 섞어서 읽지 않는다.
+
+## 6. 분할기 변경에 따른 민감도 (cold-start 검증 fold 구성)
+cold-start의 하이퍼파라미터 선택은 train 사용자 5-fold GroupKFold의 첫 fold를 검증으로 쓴다. 이 fold 구성은 분할기에 따라 다르다: 처음 실행(커밋 00c27d1)은 sklearn GroupKFold(그룹 크기 기반 결정적 분할), 재현성 고정 후에는 ridge_lib의 GroupKFold(시드 42 셔플 후 균등분할). **둘 다 같은 사용자가 fold 양쪽에 걸치지 않는 유효한 CV 선택이며, 어느 쪽이 더 낫다고 판단하지 않는다.** 아래는 같은 코드·같은 격자에서 fold 구성만 바뀐 효과다 (personalized는 시간순 분할이라 영향 없음, 값 불변).
+
+| 분할기 | 선택 하이퍼파라미터 | test MAE(대표 시드 42) | 5시드 평균±표준편차 | median-5 대비 개선폭 [95% CI] | GBM−MLP [95% CI] |
+|---|---|---|---|---|---|
+| sklearn GroupKFold (커밋 00c27d1 시점, 문서 기록값) | {'n_hidden_layers': 2, 'width': 64, 'weight_decay': 0.0}, 에폭 97 | 59.578 | 59.514±0.050 | 2.661 [1.865, 3.535] | 0.104 [-0.560, 0.941] |
+| ridge_lib GroupKFold (현재, 고정) | {'n_hidden_layers': 2, 'width': 32, 'weight_decay': 0.0001}, 에폭 112 | 59.374 | 59.379±0.089 | 2.861 [2.178, 3.597] | 0.304 [-0.361, 1.203] |
+
+**기록**: fold 구성이 바뀌자 선택된 구조·에폭이 달라졌고 cold-start MLP의 test MAE가 약 0.2초/km 움직였다. 두 설정 모두에서 MLP는 median-5보다 유의하게 낫고 GBM과는 구분되지 않는다(위 CI 기준). 이 0.2초/km는 하이퍼파라미터 선택이 검증 fold 구성에 민감하다는 정도를 보여주는 값이며, GBM은 같은 격자·같은 선택이 유지됐다(7단계 문서). 이 변동의 원인 분해(검증 fold 데이터 차이 vs 조기종료/에폭 변화)는 하지 않았다 — **추정/미확인**.

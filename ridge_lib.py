@@ -237,3 +237,26 @@ if __name__ == "__main__":
 
     overlap = _validate_group_kfold_no_overlap()
     print(f"[검증] GroupKFold(합성 데이터, 5-fold) fold간 사용자 겹침 최대값: {overlap} (0이어야 통과, 통과)")
+
+
+class RidgePipeline:
+    """표준화(ManualStandardScaler, 학습 데이터에서만 fit) + Ridge를 묶은 sklearn Pipeline 대체.
+    7단계 이후 모든 Ridge는 sklearn import 성공 여부와 무관하게 이것을 쓴다(재현성 고정)."""
+
+    def __init__(self, alpha):
+        self.alpha = alpha
+
+    def fit(self, X, y):
+        self.scaler_ = ManualStandardScaler().fit(X)
+        self.beta_, self.intercept_ = ridge_fit(self.scaler_.transform(X), y, alpha=self.alpha)[:2]
+        return self
+
+    def predict(self, X):
+        return ridge_predict(self.scaler_.transform(X), self.beta_, self.intercept_)
+
+
+def group_kfold_splits(user_ids, n_folds, seed):
+    """group_kfold_indices의 인덱스 배열 버전: (train_idx, val_idx)를 순서대로 돌려준다.
+    sklearn GroupKFold와 fold 멤버십은 다르다(시드 셔플 후 균등분할)."""
+    for tr_mask, val_mask in group_kfold_indices(np.asarray(user_ids), n_folds, seed):
+        yield np.where(tr_mask)[0], np.where(val_mask)[0]

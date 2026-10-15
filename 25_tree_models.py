@@ -116,36 +116,60 @@ def _param_key(params):
     return tuple(sorted(params.items())) if isinstance(params, dict) else params
 
 
-# ===================== Step 0: 환경 확인 + sklearn 대조 =====================
+# ===================== Step 0: 환경 확인 + (진단용) sklearn 대조 =====================
 
 def check_environment_and_compare(md):
-    md.append("## 0. 환경 확인 + ridge_lib vs sklearn 대조\n")
+    """Ridge/GroupKFold/scaler는 import 성공 여부와 무관하게 항상 ridge_lib(numpy)를 쓴다(GBM을 gbt_lib로
+    고정한 것과 같은 방식). 아래 sklearn 대조는 **진단 기록용**이며 결과 수치 생성 경로에 영향을 주지 않는다:
+    sklearn import가 정책으로 차단돼도 대조만 생략하고 파이프라인은 그대로 진행한다."""
+    md.append("## 0. 환경 확인 + ridge_lib 고정 사용 (sklearn 대조는 진단용)\n")
     md.append(f"- python: {sys.version.split()[0]}\n")
-    try:
-        import sklearn
-    except ImportError as e:
-        md.append(f"\n**[중단] `import sklearn` 실패: {e}**\n")
-        OUTPUT_MD_PATH.write_text("".join(md), encoding="utf-8")
-        print(f"[중단] import sklearn 실패: {e}")
-        sys.exit(1)
-
-    md.append(f"- numpy: {np.__version__}, scipy: {scipy.__version__}, "
-              f"sklearn: {sklearn.__version__}, pandas: {pd.__version__}\n")
-    print(f"[환경] python={sys.version.split()[0]} numpy={np.__version__} scipy={scipy.__version__} "
-          f"sklearn={sklearn.__version__} pandas={pd.__version__}")
-
-    from sklearn.linear_model import Ridge as SkRidge, HuberRegressor
-    from sklearn.model_selection import GroupKFold as SkGroupKFold
+    md.append("- **Ridge / GroupKFold / 표준화(scaler)는 항상 `ridge_lib.py`(numpy 직접 구현: `RidgePipeline`, "
+              "`group_kfold_splits`, `ManualStandardScaler`)를 쓴다. sklearn import 성공 여부와 무관하다.** "
+              "(이전 버전은 sklearn Pipeline/GroupKFold를 썼다 — 아래 '고정 전후' 주석 참고.)\n")
+    md.append("- 아래 sklearn 대조는 진단 기록용이다. sklearn이 이번 실행에서 import되지 않으면 대조만 생략된다.\n")
+    md.append(f"- numpy: {np.__version__}, scipy: {scipy.__version__}, pandas: {pd.__version__}\n")
+    print(f"[환경] python={sys.version.split()[0]} numpy={np.__version__} scipy={scipy.__version__} pandas={pd.__version__}")
 
     rng = np.random.default_rng(0)
     n, p = 300, 22
     X_cmp = rng.normal(size=(n, p))
     true_beta = rng.normal(size=p)
     y_cmp = X_cmp @ true_beta + 3.0 + rng.normal(scale=0.1, size=n)
-
     alpha_cmp = 1.0
     beta_manual, intercept_manual = rl.ridge_fit(X_cmp, y_cmp, alpha=alpha_cmp)
     pred_manual = rl.ridge_predict(X_cmp, beta_manual, intercept_manual)
+    user_ids_cmp = rng.integers(0, 50, size=n)
+    manual_folds = list(rl.group_kfold_indices(user_ids_cmp, 5, 42))
+
+    def max_overlap(val_sets):
+        m = 0
+        for i in range(len(val_sets)):
+            for j in range(i + 1, len(val_sets)):
+                m = max(m, len(val_sets[i] & val_sets[j]))
+        return m
+
+    manual_val_sets = [set(user_ids_cmp[val_mask].tolist()) for _, val_mask in manual_folds]
+    manual_overlap = max_overlap(manual_val_sets)
+    md.append(f"- **ridge_lib 자체 검증**: GroupKFold 수동구현 fold간 그룹 겹침={manual_overlap}(0이어야 함, "
+              f"{'통과' if manual_overlap == 0 else '실패'}), fold별 그룹 수={[len(s) for s in manual_val_sets]}\n")
+    if manual_overlap != 0:
+        OUTPUT_MD_PATH.write_text("".join(md), encoding="utf-8")
+        print("[중단] ridge_lib GroupKFold 겹침 != 0")
+        sys.exit(1)
+
+    try:
+        import sklearn
+        from sklearn.linear_model import Ridge as SkRidge, HuberRegressor
+        from sklearn.model_selection import GroupKFold as SkGroupKFold
+    except ImportError as e:
+        md.append(f"- **sklearn 대조 생략(진단 전용)**: 이번 실행에서 sklearn import 실패(`{str(e)[:120]}`). "
+                  "결과 수치에는 영향 없음(모든 모델이 ridge_lib/gbt_lib). 과거 실행에서의 대조 결과는 이 문서의 이전 커밋 버전 참고"
+                  "(Ridge 계수 최대차이 8.88e-16, GroupKFold 겹침 0, fold 멤버십은 sklearn과 다름).\n\n")
+        print(f"[sklearn 대조 생략] {e}")
+        return
+
+    md.append(f"- sklearn: {sklearn.__version__} (진단용)\n")
     sk_ridge = SkRidge(alpha=alpha_cmp).fit(X_cmp, y_cmp)
     pred_sklearn = sk_ridge.predict(X_cmp)
     coef_diff = float(np.abs(beta_manual - sk_ridge.coef_).max())
@@ -157,51 +181,20 @@ def check_environment_and_compare(md):
               f"**{'일치' if ridge_match else '불일치'}** (<1e-6 기준)\n")
     print(f"[Ridge 대조] coef_diff={coef_diff:.2e} pred_diff={pred_diff:.2e} intercept_diff={intercept_diff:.2e}")
 
-    user_ids_cmp = rng.integers(0, 50, size=n)
     sk_folds = list(SkGroupKFold(n_splits=5).split(X_cmp, y_cmp, groups=user_ids_cmp))
-    manual_folds = list(rl.group_kfold_indices(user_ids_cmp, 5, 42))
-
-    def max_overlap(val_sets):
-        m = 0
-        for i in range(len(val_sets)):
-            for j in range(i + 1, len(val_sets)):
-                m = max(m, len(val_sets[i] & val_sets[j]))
-        return m
-
     sk_val_sets = [set(user_ids_cmp[val_idx].tolist()) for _, val_idx in sk_folds]
-    manual_val_sets = [set(user_ids_cmp[val_mask].tolist()) for _, val_mask in manual_folds]
     sk_overlap = max_overlap(sk_val_sets)
-    manual_overlap = max_overlap(manual_val_sets)
     exact_fold_match = sorted([frozenset(s) for s in sk_val_sets]) == sorted([frozenset(s) for s in manual_val_sets])
-    sk_sizes = [len(s) for s in sk_val_sets]
-    manual_sizes = [len(s) for s in manual_val_sets]
-    groupkfold_ok = sk_overlap == 0 and manual_overlap == 0
-
-    md.append(f"- **GroupKFold 대조**(같은 데이터, 5-fold): fold간 그룹 겹침 — sklearn={sk_overlap}, "
-              f"수동구현={manual_overlap} (둘 다 0이어야 함, {'통과' if groupkfold_ok else '실패'}). "
-              f"fold별 그룹 수 — sklearn: {sk_sizes}, 수동: {manual_sizes}. "
-              f"**fold 멤버십이 완전히 같은가 = {exact_fold_match}** (sklearn GroupKFold는 "
-              f"shuffle/random_state 옵션이 없고 그룹 크기 기반 결정적 알고리즘이라 수동 구현"
-              f"(랜덤 셔플 후 균등분할)과 멤버십이 다를 수 있음 — 완전 일치는 기대 범위 밖이고, "
-              f"**둘 다 겹침 0이면 구조적으로 올바른 분할**로 판단한다.)\n")
-    print(f"[GroupKFold 대조] sk_overlap={sk_overlap} manual_overlap={manual_overlap} exact_match={exact_fold_match}")
+    md.append(f"- **GroupKFold 대조**(같은 데이터, 5-fold): 겹침 sklearn={sk_overlap}, 수동구현={manual_overlap}. "
+              f"**fold 멤버십이 완전히 같은가 = {exact_fold_match}** (sklearn GroupKFold는 그룹 크기 기반 결정적 알고리즘이라 "
+              f"수동 구현(시드 셔플 후 균등분할)과 멤버십이 다를 수 있다. **이 차이 때문에 sklearn GroupKFold에서 ridge_lib로 "
+              f"고정하면 CV/검증 분할이 바뀌어 alpha·GBM 하이퍼파라미터 선택이 달라질 수 있다.**)\n")
 
     hr = HuberRegressor(alpha=1e-4).fit(X_cmp, y_cmp)
     beta_manual_huber, intercept_manual_huber, delta_manual = rl.huber_fit(X_cmp, y_cmp, alpha=1e-4)
     corr = float(np.corrcoef(hr.coef_, beta_manual_huber)[0, 1])
     sign_match = float(np.mean(np.sign(hr.coef_) == np.sign(beta_manual_huber)))
-    md.append(f"- **Huber 정성 비교**(정의가 달라 수치 일치는 기대 안 함 — sklearn은 epsilon 기반, "
-              f"scale을 반복마다 재추정; ridge_lib은 초기 OLS 잔차 MAD로 delta 1회 고정): "
-              f"계수 상관계수={corr:.3f}, 부호 일치 비율={sign_match:.1%}\n")
-
-    gate_pass = ridge_match and groupkfold_ok
-    md.append(f"\n**게이트 판정**: Ridge 수치 일치 + GroupKFold 구조적 정합(겹침 0) 모두 만족 = "
-              f"**{gate_pass}** -> {'이후 모델은 sklearn Pipeline 기반으로 진행, ridge_lib.py는 검증용으로만 유지.' if gate_pass else '[중단] 불일치 — 보고 후 중단.'}\n\n")
-    print(f"[게이트] {'통과, sklearn 기반으로 진행' if gate_pass else '실패 - 중단'}")
-
-    if not gate_pass:
-        OUTPUT_MD_PATH.write_text("".join(md), encoding="utf-8")
-        sys.exit(1)
+    md.append(f"- **Huber 정성 비교**(정의가 달라 수치 일치는 기대 안 함): 계수 상관계수={corr:.3f}, 부호 일치 비율={sign_match:.1%}\n\n")
 
 
 def build_model_rows(test_samples, preds, label, y_key="y"):
@@ -235,10 +228,6 @@ def main():
 
     check_environment_and_compare(md)
 
-    from sklearn.linear_model import Ridge as SkRidge
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.pipeline import Pipeline
-    from sklearn.model_selection import GroupKFold as SkGroupKFold
 
     md.append("### 0-1. 추가 발견: sklearn.tree 차단(간헐적) -> gbt_lib.py로 직접 구현 고정 사용\n")
     try:
@@ -370,14 +359,13 @@ def main():
     md.append("## 2. 모델\n\n### (a) Ridge (확장 피처)\n")
 
     def ridge_pipeline(alpha):
-        return Pipeline([("scaler", StandardScaler()), ("ridge", SkRidge(alpha=alpha))])
+        return rl.RidgePipeline(alpha)  # ridge_lib 고정(sklearn 미사용)
 
     def select_alpha_group_cv(X, y, user_ids, alphas):
-        gkf = SkGroupKFold(n_splits=N_FOLDS)
         scores = {}
         for a in alphas:
             maes = []
-            for tr_idx, val_idx in gkf.split(X, y, groups=user_ids):
+            for tr_idx, val_idx in rl.group_kfold_splits(user_ids, N_FOLDS, CV_SEED):
                 model = ridge_pipeline(a).fit(X[tr_idx], y[tr_idx])
                 pred = model.predict(X[val_idx])
                 maes.append(np.mean(np.abs(y[val_idx] - pred)))
@@ -422,11 +410,10 @@ def main():
               f"min_samples_leaf={GBT_MIN_SAMPLES_LEAF} 고정, n_bins={GBT_N_BINS} 고정.\n")
 
     def select_hgb_group_cv(X, y, user_ids, param_list, loss="absolute_error"):
-        gkf = SkGroupKFold(n_splits=N_FOLDS)
         scores = {}
         for params in param_list:
             maes = []
-            for tr_idx, val_idx in gkf.split(X, y, groups=user_ids):
+            for tr_idx, val_idx in rl.group_kfold_splits(user_ids, N_FOLDS, CV_SEED):
                 model = make_gbt(params, loss)
                 model.fit(X[tr_idx], y[tr_idx])
                 pred = model.predict(X[val_idx])
@@ -472,11 +459,10 @@ def main():
     md.append("### (c) median5 + 잔차 학습 (y - median5를 absolute_error로 학습, 예측 = median5 + 잔차예측)\n")
 
     def select_resid_group_cv(X, y, user_ids, param_list):
-        gkf = SkGroupKFold(n_splits=N_FOLDS)
         scores = {}
         for params in param_list:
             maes = []
-            for tr_idx, val_idx in gkf.split(X, y, groups=user_ids):
+            for tr_idx, val_idx in rl.group_kfold_splits(user_ids, N_FOLDS, CV_SEED):
                 med_tr = median5_from_X(X[tr_idx])
                 med_val = median5_from_X(X[val_idx])
                 model = make_gbt(params, "absolute_error")
@@ -777,7 +763,7 @@ def main():
     for split_name in ["cold-start", "personalized"]:
         best = cv_selected_per_split[split_name]
         if split_name == "cold-start":
-            tr_idx, val_idx = next(iter(SkGroupKFold(n_splits=N_FOLDS).split(X_tr, y_tr, groups=uid_tr)))
+            tr_idx, val_idx = next(iter(rl.group_kfold_splits(uid_tr, N_FOLDS, CV_SEED)))
             X_fit, y_fit = X_tr[tr_idx], y_tr[tr_idx]
             X_val, y_val = X_tr[val_idx], y_tr[val_idx]
             alpha_sel, hgb_params_sel, resid_params_sel = cold_ridge_alpha, cold_hgb_params, cold_resid_params
@@ -817,6 +803,8 @@ def main():
                   "이 피처들 때문'이라고 인과적으로 결론 내릴 수 없다 — 그러려면 신규 피처를 뺀 "
                   "ablation 모델이 필요한데 이번 요청 범위에서는 만들지 않았다. 아래는 **미확인**으로만 "
                   "남긴다: 개선의 몇 %가 새 피처 덕분인지.\n")
+        if split_name == "cold-start":
+            md.append('\n- **분할기 고정에 따른 변경(기록)**: 이전 실행(sklearn GroupKFold)의 cold-start 검증 fold에서는 상위 10위에 `cumulative_session_count`(중요도 0.100)가 있었으나, ridge_lib GroupKFold로 고정한 뒤의 검증 fold에서는 `past5_pace_mad`(0.105)로 바뀌었다. 상위 3위(user_history_median_pace, median_past5_elapsed_pace, median_past5_moving_pace)는 같지만 값이 달라졌다(예: user_history_median_pace 8.032→8.645, median_past5_elapsed_pace 3.389→1.919, days_since_last_session 0.974→0.407). 하위권 순위는 검증 fold 구성에 민감하다. 원인(검증 fold 데이터 차이)은 분해하지 않았다 — **추정/미확인**. personalized는 시간순 검증이라 변화 없음.\n')
 
     all_samples_check = train_samples + test_samples + p_train_samples + p_test_samples
     gaps_check = [s["target_start_time"] - s["last_input_session_time"] for s in all_samples_check]

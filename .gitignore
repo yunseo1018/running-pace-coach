@@ -14,3 +14,4 @@ data/
 CLAUDE_Backup.md
 # 감사 대응표/샘플 (원본 데이터 파생 사용자·세션 ID 목록, 재배포 금지 데이터에서 파생 -> 저장소에 포함하지 않음; 13/14/16 스크립트로 재생성)
 docs/merge_audit/
+!docs/mlp_selected_hyperparams.json

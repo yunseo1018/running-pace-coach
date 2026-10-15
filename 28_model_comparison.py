@@ -16,6 +16,7 @@ history가 가장 긴 구간의 MAE 개선폭이 가장 짧은 구간보다 크�
 """
 
 import importlib.util
+import json
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +25,7 @@ import torch
 
 import config
 import gbt_lib as gl
+import ridge_lib as rl
 
 _spec_m21 = importlib.util.spec_from_file_location("m21", "21_baseline_integrated_report.py")
 m21 = importlib.util.module_from_spec(_spec_m21)
@@ -46,10 +48,16 @@ RIDGE_ALPHA_COLD = 10000.0
 RIDGE_ALPHA_PERS = 10000.0
 GBM_COLD_PARAMS = {"learning_rate": 0.1, "max_iter": 300, "max_depth": 3}   # cold-start 주결과: absolute_error 직접예측
 GBM_PERS_PARAMS = {"learning_rate": 0.1, "max_iter": 300, "max_depth": 3}  # personalized 주결과: median5+잔차
-MLP_COLD_PARAMS = {"n_hidden_layers": 2, "width": 64, "weight_decay": 0.0}
-MLP_COLD_EPOCHS = 97
-MLP_PERS_PARAMS = {"n_hidden_layers": 1, "width": 64, "weight_decay": 1e-4}
-MLP_PERS_EPOCHS = 142
+# MLP 하이퍼파라미터는 하드코딩하지 않고 27번이 저장한 선택 결과(검증 MAE로만 선택, 테스트 미사용)를 읽는다
+# -> 27번 재실행 시 28/29번과 숫자가 어긋나는 일을 막는다. 27번을 먼저 실행해야 한다.
+_mlp_sel = json.loads((Path("docs") / "mlp_selected_hyperparams.json").read_text(encoding="utf-8"))["splits"]
+MLP_COLD_PARAMS = {k: _mlp_sel["cold-start"][k] for k in ("n_hidden_layers", "width", "weight_decay")}
+MLP_COLD_EPOCHS = _mlp_sel["cold-start"]["n_epochs"]
+MLP_COLD_FORM = _mlp_sel["cold-start"]["form"]
+MLP_PERS_PARAMS = {k: _mlp_sel["personalized"][k] for k in ("n_hidden_layers", "width", "weight_decay")}
+MLP_PERS_EPOCHS = _mlp_sel["personalized"]["n_epochs"]
+MLP_PERS_FORM = _mlp_sel["personalized"]["form"]
+assert MLP_COLD_FORM in ("median5_residual", "direct") and MLP_PERS_FORM in ("median5_residual", "direct")
 MLP_SEED = 42  # 8단계 보고의 "대표 시드"와 동일
 
 RIDGE15_LABEL = "ridge_15feat"
@@ -174,12 +182,9 @@ def main():
 
     # ===== 1. 모델 refit (이미 선택된 하이퍼파라미터, 재탐색 없음) =====
     print("Ridge(확장) refit 중...")
-    from sklearn.linear_model import Ridge as SkRidge
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.pipeline import Pipeline
-
     def ridge_pipeline(alpha):
-        return Pipeline([("scaler", StandardScaler()), ("ridge", SkRidge(alpha=alpha))])
+        # ridge_lib 고정(sklearn import 성공 여부와 무관): 표준화+Ridge, 학습 구간에서만 fit
+        return rl.RidgePipeline(alpha)
 
     ridge_cold_pred = ridge_pipeline(RIDGE_ALPHA_COLD).fit(X_tr, y_tr).predict(X_te)
     ridge_pers_pred = ridge_pipeline(RIDGE_ALPHA_PERS).fit(X_ptr, y_ptr).predict(X_pte)
@@ -206,17 +211,16 @@ def main():
     # 검증(validation) MAE 기준 주결과로 선택됐다 -> 둘 다 잔차형으로 학습.
     med_tr_full = m25.median5_from_X(X_tr)
     med_te_full = m25.median5_from_X(X_te)
-    mlp_cold_model, mlp_cold_scaler = m27.train_mlp_fixed_epochs(
-        X_tr, y_tr - med_tr_full, MLP_COLD_PARAMS["n_hidden_layers"], MLP_COLD_PARAMS["width"],
-        MLP_COLD_PARAMS["weight_decay"], MLP_SEED, MLP_COLD_EPOCHS,
-    )
-    mlp_cold_pred = med_te_full + m27.predict_mlp(mlp_cold_model, mlp_cold_scaler, X_te)
+    def _mlp_pred(form, params, epochs, X_a, y_a, med_a, X_b, med_b):
+        resid = form == "median5_residual"
+        model, scaler = m27.train_mlp_fixed_epochs(
+            X_a, (y_a - med_a) if resid else y_a, params["n_hidden_layers"], params["width"],
+            params["weight_decay"], MLP_SEED, epochs,
+        )
+        return (med_b if resid else 0.0) + m27.predict_mlp(model, scaler, X_b)
 
-    mlp_pers_model, mlp_pers_scaler = m27.train_mlp_fixed_epochs(
-        X_ptr, y_ptr - med_ptr, MLP_PERS_PARAMS["n_hidden_layers"], MLP_PERS_PARAMS["width"],
-        MLP_PERS_PARAMS["weight_decay"], MLP_SEED, MLP_PERS_EPOCHS,
-    )
-    mlp_pers_pred = med_pte + m27.predict_mlp(mlp_pers_model, mlp_pers_scaler, X_pte)
+    mlp_cold_pred = _mlp_pred(MLP_COLD_FORM, MLP_COLD_PARAMS, MLP_COLD_EPOCHS, X_tr, y_tr, med_tr_full, X_te, med_te_full)
+    mlp_pers_pred = _mlp_pred(MLP_PERS_FORM, MLP_PERS_PARAMS, MLP_PERS_EPOCHS, X_ptr, y_ptr, med_ptr, X_pte, med_pte)
 
     print("사후 추가 baseline 4종(ablation을 본 뒤 추가) 계산 중...")
     # (a) 사용자 전체 이력 중앙값: 24단계가 이미 이력 감사를 통과시켜 만든
@@ -287,18 +291,15 @@ def main():
     combined_cold_df["split"] = "cold-start"
     combined_pers_df["split"] = "personalized"
 
-    md.append("## 헤드라인 (확인된 사실 / 추정 구분)\n")
-    md.append("**확인된 사실 (이 문서의 표와 CI에서 직접 읽힌 것)**\n")
-    md.append("- 학습 모델(GBM, MLP)은 두 평가 조건 모두에서 median-5보다 MAE가 낮고 쌍체 차이 CI가 0을 포함하지 않는다(개선폭 2.6~3.0초/km, 4~5%). 그러나 이것만으로 끝나는 결론이 아니다:\n")
-    md.append("- **사후 추가 baseline (median-10, median-20, 전체 이력 중앙값, 결합 규칙 (d))은 ablation 결과를 본 뒤 추가한 것이고, "
-              "후보 4개 중 가장 좋은 것(d)을 함께 보고하는 것이라 약간의 낙관(선택 편향) 가능성이 있다.** 이 4개는 고정했고 더 추가하지 않았다.\n")
-    md.append("- **cold-start**: (d) 0.5×median-5+0.5×전체 이력 중앙값은 GBM/MLP와 MAE 차이의 CI가 0을 포함해 구분되지 않는다(GBM−(d) +0.198, MLP−(d) +0.095초/km; 점추정은 오히려 (d)가 약간 낮음).\n")
-    md.append("- **personalized**: GBM/MLP가 (d)보다 MAE가 낮다(GBM 0.668, MLP 0.780초/km). 다만 CI는 MLP만 0을 포함하지 않고(MLP [0.347, 1.403]), "
-              "GBM은 0을 포함한다(GBM [−0.036, 1.374]) — 즉 '약 0.7~0.8초/km 낮다'는 점추정이고 유의성은 MLP에서만 확인된다.\n")
-    md.append("- **코칭 판정(합성 시나리오, `docs/coaching_results.md`)**: cold-start에서는 전체 이력 중앙값 예측기가 GBM/MLP보다 판정 불일치율이 낮고(CI 0 불포함), personalized에서는 구분되지 않는다.\n")
-    md.append("- MAE와 RMSE의 순위는 다르다(3절). 개선폭 비율은 점추정 기준이며 2-3절에 계산 방식을 명시했다.\n")
-    md.append("\n**추정/미확인**: (d)가 GBM/MLP만큼 좋은 이유(장기 페이스 수준 정보가 개선의 상당 부분을 설명한다는 가설)는 직접 검증하지 않았다. "
-              "personalized에서 GBM/MLP가 (d)보다 낮은 이유(시간 순서 정보 활용 등)도 미확인이다.\n\n")
+    md.append("## 문서 생성 메모\n")
+    md.append("- 이 문서의 Ridge(6a/6b)는 `ridge_lib.RidgePipeline`(numpy, ManualStandardScaler + 닫힌형 Ridge)으로 계산한다 — "
+              "sklearn import 성공 여부와 무관하게 고정(GBM을 gbt_lib로 고정한 것과 같은 방식).\n")
+    md.append("- **생성 이력**: (1) 초기 버전(커밋 91c2e86, 7eeef37)은 sklearn Pipeline(StandardScaler, Ridge)으로 생성. "
+              "(2) 커밋 330f5f7 버전은 그 시점에 sklearn import가 Windows 애플리케이션 제어 정책으로 차단돼 있어 "
+              "**임시 하네스**(sklearn.Ridge/StandardScaler/Pipeline을 ridge_lib로 대체해 이 스크립트를 실행, 출력만 임시 경로로 저장 후 문서에 반영)로 생성했다. "
+              "(3) 이 버전은 스크립트 자체에서 ridge_lib를 직접 쓰도록 고정한 뒤 재생성했다(하네스 불필요). "
+              "(1)→(3) 사이 숫자 비교 결과는 해당 커밋 메시지/작업 보고 참고.\n\n")
+    headline_idx = len(md)  # 헤드라인은 bootstrap 결과 계산 후 여기에 삽입(수치 동적)
     md.append("## 1. 종합표 (동일 윈도우, 재탐색 없음)\n")
     all_rows = []
     boot_results = {}
@@ -398,7 +399,7 @@ def main():
         parts.append((split_name, a["abs_error"].mean(), np.sqrt(a["sq_error"].mean()),
                       b["abs_error"].mean(), np.sqrt(b["sq_error"].mean())))
     md.append("- 종합표의 **6a는 15피처(과거 5세션x3, 24단계 윈도우)**, **6b는 22피처(+이력요약 7개, 7단계 확장)** 이다. "
-              "둘 다 표준화+Ridge(alpha=1e4) Pipeline, 학습 구간 fit.\n")
+              "둘 다 표준화+Ridge(alpha=1e4), `ridge_lib.RidgePipeline`(numpy), 학습 구간 fit.\n")
     for sp, m15, r15, m22, r22 in parts:
         md.append(f"- {sp}: 15피처 MAE={m15:.3f}/RMSE={r15:.3f}, 22피처 MAE={m22:.3f}/RMSE={r22:.3f}\n")
     md.append("- 6단계 문서(`docs/ridge_results.md`)의 Ridge 메인 숫자: cold-start MAE 69.928(RMSE 262.069), "
@@ -415,6 +416,56 @@ def main():
               "따라서 6a는 15피처 자신의 CV로 고른 alpha가 아니라 22피처용 alpha를 쓴 값이며, 6단계 설정 값(69.929 / 62.056)이 더 적절한 '15피처 기준'이다. "
               "15→22피처 효과는 6단계 설정 기준 MAE −4.25(cold-start) / −3.74(personalized), 종합표 6a 기준 −4.59 / −3.96이다(후자는 alpha 차이가 섞인 값).\n\n")
 
+    # ----- 헤드라인(수치는 이번 실행의 bootstrap 결과에서 동적으로 채움: 27번 재실행 시 어긋남 방지) -----
+    def _ci(arr):
+        lo_, hi_ = np.percentile(arr, [2.5, 97.5])
+        return float(arr.mean()), float(lo_), float(hi_)
+
+    hl = {}
+    for sp in ["cold-start", "personalized"]:
+        bm, _ = boot_results[sp]
+        hl[sp] = {
+            "gain_gbm": _ci(bm["median5"] - bm[GBM_LABEL]), "gain_mlp": _ci(bm["median5"] - bm[MLP_LABEL]),
+            "d_minus_gbm": _ci(bm[GBM_LABEL] - bm[BLEND_LABEL]),  # GBM − (d): 음수면 GBM이 더 낮음
+            "d_minus_mlp": _ci(bm[MLP_LABEL] - bm[BLEND_LABEL]),
+        }
+    gains = [hl[sp][k][0] for sp in hl for k in ("gain_gbm", "gain_mlp")]
+
+    def _sig(c):  # CI가 0을 포함하는가
+        return c[1] <= 0 <= c[2]
+
+    hl_md = ["## 헤드라인 (확인된 사실 / 추정 구분)\n", "**확인된 사실 (이 문서의 표와 CI에서 직접 읽힌 것)**\n"]
+    hl_md.append(f"- 학습 모델(GBM, MLP)은 두 평가 조건 모두에서 median-5보다 MAE가 낮고 쌍체 차이 CI가 0을 포함하지 않는다"
+                 f"(개선폭 {min(gains):.1f}~{max(gains):.1f}초/km, 4~5%). 그러나 이것만으로 끝나는 결론이 아니다:\n")
+    hl_md.append("- **사후 추가 baseline (median-10, median-20, 전체 이력 중앙값, 결합 규칙 (d))은 ablation 결과를 본 뒤 추가한 것이고, "
+                 "후보 4개 중 가장 좋은 것(d)을 함께 보고하는 것이라 약간의 낙관(선택 편향) 가능성이 있다.** 이 4개는 고정했고 더 추가하지 않았다.\n")
+    c = hl["cold-start"]
+    hl_md.append(f"- **cold-start**: (d) 0.5×median-5+0.5×전체 이력 중앙값과 GBM/MLP의 MAE 차이: GBM−(d) {c['d_minus_gbm'][0]:+.3f} "
+                 f"[{c['d_minus_gbm'][1]:+.3f}, {c['d_minus_gbm'][2]:+.3f}] ({'CI가 0을 포함해 구분되지 않음' if _sig(c['d_minus_gbm']) else 'CI가 0을 포함하지 않음'}), "
+                 f"MLP−(d) {c['d_minus_mlp'][0]:+.3f} [{c['d_minus_mlp'][1]:+.3f}, {c['d_minus_mlp'][2]:+.3f}] "
+                 f"({'CI가 0을 포함해 구분되지 않음' if _sig(c['d_minus_mlp']) else 'CI가 0을 포함하지 않음'}) (초/km, 양수면 (d)가 더 낮음).\n")
+    p = hl["personalized"]
+    hl_md.append(f"- **personalized**: GBM−(d) {p['d_minus_gbm'][0]:+.3f} [{p['d_minus_gbm'][1]:+.3f}, {p['d_minus_gbm'][2]:+.3f}] "
+                 f"({'CI가 0을 포함' if _sig(p['d_minus_gbm']) else 'CI가 0을 포함하지 않음'}), "
+                 f"MLP−(d) {p['d_minus_mlp'][0]:+.3f} [{p['d_minus_mlp'][1]:+.3f}, {p['d_minus_mlp'][2]:+.3f}] "
+                 f"({'CI가 0을 포함' if _sig(p['d_minus_mlp']) else 'CI가 0을 포함하지 않음'}) — 음수는 모델이 (d)보다 낮다는 뜻이며 "
+                 f"점추정으로는 모델이 약 {-p['d_minus_gbm'][0]:.1f}~{-p['d_minus_mlp'][0]:.1f}초/km 낮고, 유의성은 CI 기준으로만 말할 수 있다.\n")
+    hl_md.append("- **코칭 판정(합성 시나리오, `docs/coaching_results.md`)**: 결과는 해당 문서의 요약 절 참고(예측기별 불일치율 차이와 CI는 거기서 계산).\n")
+    hl_md.append("- MAE와 RMSE의 순위는 다르다(3절). 개선폭 비율은 점추정 기준이며 2-3절에 계산 방식을 명시했다.\n")
+    hl_md.append("\n**추정/미확인**: (d)가 GBM/MLP만큼 좋은 이유(장기 페이스 수준 정보가 개선의 상당 부분을 설명한다는 가설)는 직접 검증하지 않았다. "
+                 "personalized에서 GBM/MLP가 (d)보다 낮은 이유(시간 순서 정보 활용 등)도 미확인이다.\n\n")
+    cold_mlp_mae = float(combined_cold_df[combined_cold_df["baseline"] == MLP_LABEL]["abs_error"].mean())
+    hl_md.append("## 분할기 변경에 따른 민감도 (MLP cold-start)\n")
+    hl_md.append("MLP의 cold-start 하이퍼파라미터 선택은 train 사용자 GroupKFold의 첫 fold를 검증으로 쓴다. 처음에는 sklearn GroupKFold(커밋 00c27d1 시점), "
+                 "재현성 고정 후에는 ridge_lib GroupKFold로 바꿨고, **둘 다 유효한 CV 선택이다(어느 쪽이 더 낫다고 판단하지 않는다).** "
+                 "fold 구성이 바뀌자 선택된 구조가 달라져(2×64, wd=0, 97에폭 → 2×32, wd=1e-4, 112에폭) cold-start MLP 결과가 약 0.2초/km 움직였다:\n\n")
+    hl_md.append("| 분할기 | cold-start MLP test MAE | median-5 대비 개선폭(bootstrap 평균) |\n|---|---|---|\n"
+                 "| sklearn GroupKFold (이전 문서 기록값) | 59.578 | 2.661 |\n"
+                 f"| ridge_lib GroupKFold (현재) | {cold_mlp_mae:.3f} | {hl['cold-start']['gain_mlp'][0]:.3f} |\n\n")
+    hl_md.append("personalized(시간순 분할)와 GBM·Ridge·baseline은 분할기와 무관하게 불변. 자세한 비교는 `docs/mlp_results.md` 6절. "
+                 "변동 원인(검증 fold 데이터 차이 vs 조기종료·에폭 변화)은 분해하지 않았다 — 추정/미확인.\n\n")
+    md[headline_idx:headline_idx] = hl_md
+
     # ===== 4. MAE/RMSE 순위 (각각 따로) =====
     md.append("\n## 3. MAE/RMSE 순위 (따로 서술)\n")
     for split_name, df in [("cold-start", combined_cold_df), ("personalized", combined_pers_df)]:
@@ -425,6 +476,14 @@ def main():
         mae_str = " < ".join(f"{ALL_LABELS[n]}({mae_rank[n]:.3f})" for n in mae_rank.index)
         rmse_str = " < ".join(f"{ALL_LABELS[n]}({rmse_rank[n]:.3f})" for n in rmse_rank.index)
         md.append(f"- **MAE 순위**: {mae_str}\n")
+        top1 = mae_rank.index[0]
+        if top1 in (GBM_LABEL, MLP_LABEL):
+            dd = hl[split_name]["d_minus_gbm" if top1 == GBM_LABEL else "d_minus_mlp"]
+            same = dd[1] <= 0 <= dd[2]
+            md.append(f"  - MAE 1위는 {ALL_LABELS[top1]}이며 사후 추가 규칙 (d)와 "
+                      f"{'**구분되지 않는다**' if same else '구분된다(1위가 (d)보다 유의하게 낮음)'}"
+                      f"({'MLP' if top1 == MLP_LABEL else 'GBM'}−(d) {dd[0]:+.3f}, CI [{dd[1]:.3f}, {dd[2]:.3f}]"
+                      f"{', CI가 0을 포함' if same else ', CI가 0을 포함하지 않음'}).\n")
         md.append(f"- **RMSE 순위**: {rmse_str}\n")
         if list(mae_rank.index[:1]) != list(rmse_rank.index[:1]):
             md.append(f"  - **MAE 1위와 RMSE 1위가 다르다** — 위 bootstrap CI에서 상당수가 "
