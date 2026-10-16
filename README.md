@@ -40,7 +40,7 @@
 | 6 | Ridge + 사후 거리 조건 분석(별도 보고, 러닝 전 예측 성능 아님) | `docs/ridge_results.md` |
 | 7 | 이력 요약 피처 + 직접 구현 GBM(`gbt_lib.py`), 라벨 셔플·ablation 등 검증 | `docs/tree_results.md` |
 | 8 | torch MLP(L1 손실) | `docs/mlp_results.md` |
-| 9 | 전체 종합표, 사후 baseline 4종, LSTM 시도 여부 판단(사전 고정 규칙 → **미시도**) | `docs/model_comparison.md` |
+| 9 | 전체 종합표, 탐색적 baseline 4종, LSTM 시도 여부 판단(사전 고정 규칙 → **미시도**) | `docs/model_comparison.md` |
 | 10 | 코칭 1단계: 합성 목표, 주간 체크포인트, 격차, 고정 템플릿 | `coaching_lib.py` |
 | 11 | 코칭 평가 분리: 예측 오차가 판정을 얼마나 흔드는가 | `docs/coaching_results.md` |
 | 12 | README/CLAUDE.md 정리 | 이 문서 |
@@ -60,13 +60,13 @@
 | 6b. Ridge (22피처) | 65.681 [54.295, 81.790] | 261.101 [153.551, 365.510] | 58.313 [52.326, 64.592] | 241.292 [179.056, 300.898] |
 | 7. 직접 구현 GBM | 59.664 [48.193, 75.706] | 284.865 [157.942, 404.053] | 53.600 [47.814, 59.967] | 253.092 [185.336, 315.405] |
 | 8. MLP | 59.374 [48.333, 74.779] | 270.872 [156.274, 379.761] | 53.485 [47.935, 59.564] | 245.790 [181.619, 306.374] |
-| P1~P4 사후 추가 단순 규칙(ablation을 본 뒤 추가) | `docs/model_comparison.md` 참조 (예: P4 = 0.5·median-5+0.5·전체이력중앙값 MAE 59.476 / 54.264) | | | |
+| P1~P4 탐색적 단순 규칙(결과를 본 뒤 추가)(ablation을 본 뒤 추가) | `docs/model_comparison.md` 참조 (예: P4 = 0.5·median-5+0.5·전체이력중앙값 MAE 59.476 / 54.264) | | | |
 
 읽는 법 (**확인된 사실**과 **추정/미확인**을 구분):
 
 **확인된 사실**
 - **MAE**: GBM·MLP는 median-5보다 낮고 쌍체 차이 CI가 0을 포함하지 않습니다(GBM 개선폭 cold-start 2.557 [1.579, 3.496], personalized 2.842 [2.359, 3.335]; MLP 2.861 [2.178, 3.597] / 2.955; 상대 4~5%). GBM과 MLP는 서로 구분되지 않습니다. 그러나 "학습 모델이 median-5를 이긴다"에서 끝나지 않습니다: (윈도우 풀링 MAE 기준, 22피처 기준; 사용자별 MAE 평균(macro)에서는 일부 조건에서 CI가 0을 포함하고, cold-start GBM22처럼 점추정이 오히려 높은 경우가 있음 — `docs/same_scope_comparison.md` 7-3절)
-- **사후 추가 단순 규칙은 낙관 가능성이 있습니다**: median-10/20, 전체 이력 중앙값, 결합 규칙 (d)=0.5·median-5+0.5·전체 이력 중앙값은 ablation 결과를 본 뒤 추가한 baseline 4개이고, 그중 가장 좋은 것(d)을 함께 보고하므로 약간의 선택 편향(낙관) 가능성이 있습니다(4개로 고정, 더 추가하지 않음).
+- **탐색적 단순 규칙(결과를 본 뒤 추가)은 낙관 가능성이 있습니다**: median-10/20, 전체 이력 중앙값, 결합 규칙 (d)=0.5·median-5+0.5·전체 이력 중앙값은 ablation 결과를 본 뒤 추가한 baseline 4개이고, 그중 가장 좋은 것(d)을 함께 보고하므로 약간의 선택 편향(낙관) 가능성이 있습니다(4개로 고정, 더 추가하지 않음).
 - **cold-start에서는 (d)가 GBM/MLP와 구분되지 않습니다**(GBM−(d) +0.198 [−0.641, +1.266], MLP−(d) −0.106 [−0.543, +0.337]초/km, CI 모두 0 포함; 점추정은 GBM보다는 (d)가, (d)보다는 MLP가 약간 낮음). 종합표 MAE 순위에서 cold-start 1위는 MLP(59.374)이지만 **(d)와 구분되지 않습니다(MLP−(d) −0.106, CI [−0.543, 0.337])**.
 - **personalized에서만 GBM/MLP가 (d)보다 낮습니다**: GBM 0.668, MLP 0.780초/km 낮은 점추정이며, CI는 MLP만 0을 포함하지 않고(MLP [0.347, 1.403]) GBM은 0을 포함합니다([−0.036, 1.374]).
 - **개선폭 비율**(median-5 대비 GBM 개선폭 중 (d)가 차지하는 몫): 평균 MAE 개선폭의 비율로 계산하며 cold-start 1.07(GBM)/0.96(MLP), personalized 0.77/0.74입니다(bootstrap 비율의 중앙값이 아님; 계산 방식은 `docs/model_comparison.md` 2-3절).
@@ -94,6 +94,31 @@
 ### 코칭 평가 (합성 시나리오 — 실제 사용자 목표 기반 성능이 아님)
 
 데이터에 사용자가 입력한 실제 목표가 없어 목표 비율(3/5/10%), 데드라인(8주, 민감도 4주), 카테고리 임계값(±3%, +10%)은 모두 결과를 보기 전에 고정한 합성 설정입니다. 판정 불일치율(실제 페이스로 판정한 카테고리와 다른 비율)은 median-5 제외 62~67% 수준이고, 주당 체크포인트 이동(약 2초/km)이 예측 오차(MAE 약 55~60초/km)보다 훨씬 작아 판정은 예측 오차와 러닝 간 변동에 좌우됩니다. 학습/이력 구간에서 정한 상수 규칙 대비 GBM/MLP는 cold-start에서 구분되지 않고 personalized에서 약 3.6~4.1%p 낮았습니다(`docs/coaching_results.md`). median-5 대비 감소폭은 현재 실력을 median-5로 정의한 시나리오의 구조 효과라 결과로 인용하지 않습니다.
+
+## 10월 3주차 산출물
+
+교수 피드백(10/12)에 따라 새 모델을 늘리지 않고 비교 조건과 코칭 평가의 의미를 고정한 주의 문서들입니다. 코칭 관련 결과는 모두 합성 시나리오 기준입니다.
+
+| 문서 | 한 줄 설명 | 생성 명령 |
+|---|---|---|
+| [`docs/week3_predeclaration.md`](docs/week3_predeclaration.md) | 3주차 실험의 후보·지표·판정 기준을 결과 확인 전에 적은 사전 선언(10절은 다중 세션 설계) | 수기 작성 |
+| [`docs/history_scope_table.md`](docs/history_scope_table.md) | 예측기별 사용 이력 범위 표와 cold-start 정의 | 수기 작성(코드 점검 기반) |
+| [`docs/same_scope_comparison.md`](docs/same_scope_comparison.md) | 같은 입력 범위(최근 5회 / 전체 이력) 비교, 풀링·macro MAE, 사용자 단위 cluster bootstrap CI | `python run_all.py --only 31` |
+| [`docs/coaching_definition.md`](docs/coaching_definition.md) | 합성 목표 코칭 판정 범주·분모·혼동행렬·다수 범주 baseline 정의 | 수기 작성(수치는 `--only 29`, `--only 32`의 결과 문서와 대응) |
+| [`docs/coaching_abstain_results.md`](docs/coaching_abstain_results.md) | 불확실성 구간 기반 판정 보류 실험(보류율, 판정 사례 오류율, 포함률·폭) | `python run_all.py --only 32` |
+| [`docs/extreme_session_window_map.md`](docs/extreme_session_window_map.md) | 극단 세션↔평가 윈도우 대응표, 사례 분류, 품질 기준 민감도 | `python run_all.py --only 33` |
+| [`docs/multisession_coaching_design.md`](docs/multisession_coaching_design.md) | 다중 세션 집계 코칭 평가 설계와 가용성 점검(구현·평가 없음, 사용자 승인 대기) | `python run_all.py --only 34` |
+| [`docs/environment.md`](docs/environment.md) | 패키지 버전, seed, 데이터·분할·하이퍼파라미터 해시, 실행 명령 | `python run_all.py --all` 중 자동 갱신 |
+| [`docs/sklearn_import_issue.md`](docs/sklearn_import_issue.md) | sklearn 로드 오류 진단 기록(실행 시점이 포함되어 바이트 재현성 검증 대상이 아님) | 자동 갱신 |
+
+전체 재생성은 `python run_all.py --all`(약 48분), 일부만 다시 만들 때는 `--only 28,29`처럼 단계 번호를 쉼표로 이어 씁니다. 자세한 옵션은 아래 "재현 방법"을 참고하세요.
+
+3주차 산출물의 알려진 한계:
+- 코칭 결과는 합성 목표 기준이며 실제 코칭 효과나 목표 달성의 검증이 아닙니다. 판정 보류는 보류율이 96.4~99.3%로 높아 코칭 품질 향상을 뜻하지 않습니다.
+- 유의성 표현은 윈도우 풀링 MAE 기준입니다. 사용자별 MAE 평균(macro)에서는 결론이 달라지는 조건이 있고(원인 미확인), CI가 0을 포함하는 비교는 동등성의 입증이 아닙니다.
+- 결합 규칙 (d)를 비롯한 탐색적 baseline은 결과를 본 뒤 추가한 비교군이라 낙관 가능성이 있습니다.
+- 다중 세션 집계는 설계와 표본 수 점검까지만 했고, 어떤 모델도 학습·평가하지 않았습니다. 타임존 정보가 없어 UTC 격자로 가정했고, 평가는 타깃 주에 러닝이 있었던 앵커로 조건부입니다.
+- 극단 세션 분류에서 GPS 오류·중복 흔적은 세션 표만으로 판정할 수 없어 "미판정"으로 남겼습니다.
 
 ## 주요 한계
 

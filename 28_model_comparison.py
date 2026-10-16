@@ -65,7 +65,7 @@ RIDGE15_LABEL = "ridge_15feat"
 RIDGE_LABEL = "ridge_ext"
 GBM_LABEL = "gbm"
 MLP_LABEL = "mlp"
-# 9단계 보완(Part 1-2): ablation을 본 뒤 추가한 사후 baseline 4종 (고정, 더 추가 안 함)
+# 9단계 보완(Part 1-2): ablation을 본 뒤 추가한 탐색적 baseline 4종 (고정, 더 추가 안 함)
 HIST_MEDIAN_LABEL = "user_hist_median"
 MEDIAN10_LABEL = "median10"
 MEDIAN20_LABEL = "median20"
@@ -77,10 +77,10 @@ ALL_LABELS[RIDGE15_LABEL] = "6a. Ridge(15피처,원복원)"
 ALL_LABELS[RIDGE_LABEL] = "6b. Ridge(22피처,확장)"
 ALL_LABELS[GBM_LABEL] = "7. 직접구현 GBM(주결과)"
 ALL_LABELS[MLP_LABEL] = "8. MLP(주결과)"
-ALL_LABELS[HIST_MEDIAN_LABEL] = "P1. 사용자 전체 이력 중앙값(사후추가)"
-ALL_LABELS[MEDIAN10_LABEL] = "P2. median-10(사후추가)"
-ALL_LABELS[MEDIAN20_LABEL] = "P3. median-20(사후추가)"
-ALL_LABELS[BLEND_LABEL] = "P4. 0.5*median5+0.5*전체이력중앙값(사후추가)"
+ALL_LABELS[HIST_MEDIAN_LABEL] = "P1. 사용자 전체 이력 중앙값(탐색적)"
+ALL_LABELS[MEDIAN10_LABEL] = "P2. median-10(탐색적)"
+ALL_LABELS[MEDIAN20_LABEL] = "P3. median-20(탐색적)"
+ALL_LABELS[BLEND_LABEL] = "P4. 0.5*median5+0.5*전체이력중앙값(탐색적)"
 ALL_NAMES = m21.BASELINE_NAMES + [RIDGE15_LABEL, RIDGE_LABEL, GBM_LABEL, MLP_LABEL] + POST_HOC_NAMES
 
 HIST_BINS = [0, 10, 30, 60, 120, 1e9]
@@ -229,7 +229,7 @@ def main():
     mlp_cold_pred = _mlp_pred(MLP_COLD_FORM, MLP_COLD_PARAMS, MLP_COLD_EPOCHS, X_tr, y_tr, med_tr_full, X_te, med_te_full)
     mlp_pers_pred = _mlp_pred(MLP_PERS_FORM, MLP_PERS_PARAMS, MLP_PERS_EPOCHS, X_ptr, y_ptr, med_ptr, X_pte, med_pte)
 
-    print("사후 추가 baseline 4종(ablation을 본 뒤 추가) 계산 중...")
+    print("탐색적 baseline(결과를 본 뒤 추가) 4종(ablation을 본 뒤 추가) 계산 중...")
     # (a) 사용자 전체 이력 중앙값: 24단계가 이미 이력 감사를 통과시켜 만든
     # user_history_median_pace 피처(X 22개 중 인덱스 18)를 그대로 재사용한다 — 새로 계산하면
     # 같은 값이 나오므로 중복 계산하지 않는다.
@@ -249,7 +249,7 @@ def main():
     blend_cold_pred = 0.5 * med5_cold_for_blend + 0.5 * hist_median_cold_pred
     blend_pers_pred = 0.5 * med5_pers_for_blend + 0.5 * hist_median_pers_pred
 
-    md.append("## 0-2. 사후 추가 baseline 4종 (ablation 결과를 본 뒤 추가 — 아래 4개로 고정, 더 추가하지 않음)\n")
+    md.append("## 0-2. 탐색적 baseline(결과를 본 뒤 추가) 4종 (ablation 결과를 본 뒤 추가 — 아래 4개로 고정, 더 추가하지 않음)\n")
     md.append("(a) 사용자 전체 이력 중앙값 (b) median-10 (c) median-20 (d) 0.5×median5+0.5×전체이력중앙값. "
               "모두 타깃 시작 시각 이전 세션만 사용한다 — (a)/(d)의 전체이력중앙값 부분은 24단계가 "
               "이미 '이력 감사'(가장 늦게 참조한 세션 종료 시각 < 타깃 시작 시각)를 통과시킨 "
@@ -358,9 +358,9 @@ def main():
         md.append(m21.df_to_markdown(pd.DataFrame(rows)))
         md.append("\n")
 
-    # ----- 9단계 보완: 사후 추가 baseline vs GBM/MLP, 개선폭 비율, Ridge 변형 비교 -----
-    md.append("\n## 2-2. 사후 추가 baseline(ablation을 본 뒤 추가) 쌍체 비교\n")
-    md.append("차이 = (비교대상 지표) - (사후 baseline 지표). 양수면 사후 baseline이 더 낮은(좋은) 값.\n")
+    # ----- 9단계 보완: 탐색적 baseline(결과를 본 뒤 추가) vs GBM/MLP, 개선폭 비율, Ridge 변형 비교 -----
+    md.append("\n## 2-2. 탐색적 baseline(결과를 본 뒤 추가)(ablation을 본 뒤 추가) 쌍체 비교\n")
+    md.append("차이 = (비교대상 지표) - (탐색적 baseline 지표). 양수면 탐색적 baseline이 더 낮은(좋은) 값.\n")
     share_rows = []
     for split_name in ["cold-start", "personalized"]:
         boot_mae, boot_rmse = boot_results[split_name]
@@ -371,8 +371,8 @@ def main():
                 for metric, bt in [("MAE", boot_mae), ("RMSE", boot_rmse)]:
                     diff = bt[ref] - bt[name]
                     lo, hi = np.percentile(diff, [2.5, 97.5])
-                    rows.append({"사후 baseline": ALL_LABELS[name], "비교대상": ALL_LABELS[ref],
-                                 "지표": metric, "차이(비교대상-사후)": diff.mean(), "하한": lo, "상한": hi,
+                    rows.append({"탐색적 baseline": ALL_LABELS[name], "비교대상": ALL_LABELS[ref],
+                                 "지표": metric, "차이(비교대상-탐색적)": diff.mean(), "하한": lo, "상한": hi,
                                  "0포함": bool(lo <= 0 <= hi)})
         md.append(m21.df_to_markdown(pd.DataFrame(rows)))
         md.append("\n")
@@ -444,7 +444,7 @@ def main():
     hl_md = ["## 헤드라인 (확인된 사실 / 추정 구분)\n", "**확인된 사실 (이 문서의 표와 CI에서 직접 읽힌 것)**\n"]
     hl_md.append(f"- 학습 모델(GBM, MLP)은 두 평가 조건 모두에서 median-5보다 MAE가 낮고 쌍체 차이 CI가 0을 포함하지 않는다"
                  f"(개선폭 {min(gains):.1f}~{max(gains):.1f}초/km, 4~5%) " + MACRO_NOTE + ". 그러나 이것만으로 끝나는 결론이 아니다:\n")
-    hl_md.append("- **사후 추가 baseline (median-10, median-20, 전체 이력 중앙값, 결합 규칙 (d))은 ablation 결과를 본 뒤 추가한 것이고, "
+    hl_md.append("- **탐색적 baseline(결과를 본 뒤 추가) (median-10, median-20, 전체 이력 중앙값, 결합 규칙 (d))은 ablation 결과를 본 뒤 추가한 것이고, "
                  "후보 4개 중 가장 좋은 것(d)을 함께 보고하는 것이라 약간의 낙관(선택 편향) 가능성이 있다.** 이 4개는 고정했고 더 추가하지 않았다.\n")
     c = hl["cold-start"]
     hl_md.append(f"- **cold-start**: (d) 0.5×median-5+0.5×전체 이력 중앙값과 GBM/MLP의 MAE 차이: GBM−(d) {c['d_minus_gbm'][0]:+.3f} "
@@ -487,8 +487,8 @@ def main():
         if top1 in (GBM_LABEL, MLP_LABEL):
             dd = hl[split_name]["d_minus_gbm" if top1 == GBM_LABEL else "d_minus_mlp"]
             same = dd[1] <= 0 <= dd[2]
-            md.append(f"  - MAE 1위는 {ALL_LABELS[top1]}이며 사후 추가 규칙 (d)와 "
-                      f"{'**구분되지 않는다**' if same else '구분된다(1위가 (d)보다 유의하게 낮음)'}"
+            md.append(f"  - MAE 1위는 {ALL_LABELS[top1]}이며 탐색적 baseline (d)와 "
+                      f"{'**구분되지 않는다**' if same else '구분된다(윈도우 풀링 MAE 기준 1위가 (d)보다 유의하게 낮음)'}"
                       f"({'MLP' if top1 == MLP_LABEL else 'GBM'}−(d) {dd[0]:+.3f}, CI [{dd[1]:.3f}, {dd[2]:.3f}]"
                       f"{', CI가 0을 포함' if same else ', CI가 0을 포함하지 않음'}).\n")
         md.append(f"- **RMSE 순위**: {rmse_str}\n")
@@ -544,8 +544,8 @@ def main():
                       f"차이={diffs.mean():.3f} (95% CI [{lo:.3f},{hi:.3f}]) "
                       f"-> 규칙 충족={meets_rule}\n")
 
-    md.append("\n**사후 추가 baseline의 영향(9단계 보완)**: LSTM 규칙은 median-5 대비 GBM/MLP의 history 구간별 "
-              "개선폭만 입력으로 쓰므로 사후 추가 baseline 4종은 결정에 영향을 주지 않는다(규칙·결정 불변).\n")
+    md.append("\n**탐색적 baseline(결과를 본 뒤 추가)의 영향(9단계 보완)**: LSTM 규칙은 median-5 대비 GBM/MLP의 history 구간별 "
+              "개선폭만 입력으로 쓰므로 탐색적 baseline(결과를 본 뒤 추가) 4종은 결정에 영향을 주지 않는다(규칙·결정 불변).\n")
     if lstm_try:
         md.append("\n**결론: 시도 대상.** 규칙을 충족하는 조합이 있었다. **구현은 하지 않고 계획만 "
                   "적는다**:\n")

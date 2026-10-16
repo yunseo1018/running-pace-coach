@@ -163,7 +163,7 @@ def main():
     md.append("- **고정 템플릿**: 카테고리별 3개 문구(coaching_lib.py), LLM/RAG 사용 없음. 코칭 모듈(coaching_lib.py)은 모델을 import하지 않는 별도 모듈이다.\n")
     md.append("- **예측기**: median-5 / 전체 이력 중앙값 / 0.5×median-5+0.5×전체 이력 중앙값 / 직접구현 GBM / MLP. "
               "후자 둘은 CV·검증 선택 모델(cold-start: GBM=absolute_error 직접, personalized: median5+잔차, MLP는 둘 다 median5+잔차). "
-              "전체 이력 중앙값·블렌드는 9단계에서 ablation을 본 뒤 추가한 사후 baseline이다.\n\n")
+              "전체 이력 중앙값·블렌드는 9단계에서 ablation을 본 뒤 추가한 탐색적 baseline이다.\n\n")
 
     train = pd.read_pickle(m24.EXT_TRAIN_PATH)
     test = pd.read_pickle(m24.EXT_TEST_PATH)

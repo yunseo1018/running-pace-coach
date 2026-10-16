@@ -376,7 +376,7 @@ def main():
         # 순위 (그룹 내, MAE와 RMSE 따로)
         for key, label in [("mae", "풀링 MAE"), ("macro", "macro MAE"), ("rmse", "풀링 RMSE")]:
             order = sorted(members, key=lambda k: r["pts"][k][key])
-            md.append(f"- {label} 순위(그룹 내 점추정): " + " < ".join(f"{NAMES[k]}({r['pts'][k][key]:.3f})" for k in order) + "\n")
+            md.append(f"- {label} 순위(그룹 내 점추정): " + " < ".join(f"{NAMES[k]} ({r['pts'][k][key]:.3f})" for k in order) + "\n")
         md.append("\n")
         # 개선폭
         rows = []
