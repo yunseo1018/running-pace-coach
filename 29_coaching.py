@@ -18,6 +18,7 @@
 """
 import importlib.util
 import pickle
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,7 @@ import pandas as pd
 
 import config
 import coaching_lib as cl
+import env_tools
 
 _spec = importlib.util.spec_from_file_location("m28", "28_model_comparison.py")
 m28 = importlib.util.module_from_spec(_spec)
@@ -32,7 +34,17 @@ _spec.loader.exec_module(m28)
 m21, m25, m27, m24 = m28.m21, m28.m25, m28.m27, m28.m24
 
 OUTPUT_MD_PATH = Path("docs") / "coaching_results.md"
-CACHE_PATH = Path(__import__("os").environ.get("TEMP", ".")) / "coaching_pred_cache.pkl"
+# 예측 캐시는 레포 밖(시스템 임시 폴더)에 두고 커밋하지 않는다. 캐시 키 = 관련 스크립트·gbt_lib·ridge_lib·config 해시 +
+# docs/mlp_selected_hyperparams.json 해시 + 정제 데이터 파일 sha256 — 하나라도 다르면 자동 재계산한다(3주차 6-1).
+CACHE_PATH = Path(tempfile.gettempdir()) / "coaching_pred_cache.pkl"
+CACHE_KEY_FILES = [
+    "29_coaching.py", "coaching_lib.py", "21_baseline_integrated_report.py", "24_build_xy_dataset_extended.py", "25_tree_models.py",
+    "27_mlp_torch.py", "28_model_comparison.py", "gbt_lib.py", "ridge_lib.py", "config.py", "env_tools.py",
+    "docs/mlp_selected_hyperparams.json",
+    "data/run_sessions_deduped_merged.pkl", "data/run_sessions_deduped_merged_with_moving.pkl", "data/user_sequences.pkl",
+    "data/extended_train_dataset.pkl", "data/extended_test_dataset.pkl",
+    "data/extended_personalized_train_dataset.pkl", "data/extended_personalized_test_dataset.pkl",
+]
 
 DELTAS = [0.03, 0.05, 0.10]
 DEADLINES = [8, 4]
@@ -158,13 +170,22 @@ def main():
     p_train = pd.read_pickle(m24.EXT_P_TRAIN_PATH)
     p_test = pd.read_pickle(m24.EXT_P_TEST_PATH)
 
+    cache_key = env_tools.files_key(CACHE_KEY_FILES)
+    data = None
     if CACHE_PATH.exists():
-        data = pickle.loads(CACHE_PATH.read_bytes())
-        print("예측 캐시 사용:", CACHE_PATH)
-    else:
+        try:
+            blob = pickle.loads(CACHE_PATH.read_bytes())
+        except Exception:  # 손상된 캐시는 재계산
+            blob = None
+        if isinstance(blob, dict) and blob.get("key") == cache_key:
+            data = blob["data"]
+            print("예측 캐시 사용(키 일치):", CACHE_PATH.name)
+        else:
+            print("예측 캐시 키 불일치(코드/하이퍼파라미터/데이터 변경) -> 자동 재계산")
+    if data is None:
         data = {"cold-start": build_split_data("cold-start", train, test),
                 "personalized": build_split_data("personalized", p_train, p_test)}
-        CACHE_PATH.write_bytes(pickle.dumps(data))
+        CACHE_PATH.write_bytes(pickle.dumps({"key": cache_key, "data": data}))
 
     # ---- 상수 규칙용: 학습/이력 구간에서 '참조 카테고리 최빈값'을 정하기 위한 정보 (평가 데이터 사용 안 함) ----
     # cold-start 허용 학습 자료 = train 사용자 윈도우(train), personalized 허용 학습 자료 = history 구간 윈도우(p_train).

@@ -3,8 +3,7 @@
 입력 메인 데이터: `data\run_sessions_deduped_merged.pkl` (세션 105709건, 사용자 854명, assert 통과)
 
 ## 0. 환경
-- **sklearn.neural_network.MLPRegressor의 `loss` 파라미터 기본값/타입**: `'squared_error'` (코드 기준, `inspect.signature` 확인)
-- **docstring 발췌**: loss : {'squared_error', 'poisson'}, default='squared_error' / "squared error" and "poisson" losses actually implement / "half squares error" and "half poisson deviance" to simplify the
+- **sklearn.neural_network.MLPRegressor의 `loss` 파라미터**: 이전 실행에서 확인한 결과(sklearn 1.9.1, `inspect.signature`·docstring 기준) 기본값 `'squared_error'`, 선택지 `'squared_error'`/`'poisson'`뿐이다. 이번 실행의 재확인·import 진단은 문서에 쓰지 않고 `logs/sklearn_diagnostics.log`(git 제외)에 기록한다.
 - **확인됨**: MLPRegressor는 `loss ∈ {'squared_error', 'poisson'}`만 지원하고 **L1(절대오차) 손실 옵션이 없다.** 그래서 메인 모델에 쓰지 않고, torch로 직접 L1Loss 기반 MLP를 구현했다.
 - torch: 2.14.0+cpu, numpy: 2.5.3
 - **결정성 설정**: 각 학습 전 `torch.manual_seed(seed)`를 호출한다. CPU 전용 실행(torch 2.14.0+cpu, GPU 미사용)이며, `torch.use_deterministic_algorithms`는 강제하지 않았다(의도적으로 시드 간 실제 변동을 관찰하기 위함 — 4번 참고). 데이터 순서 셔플(`torch.randperm`)도 `manual_seed`에 종속된다.

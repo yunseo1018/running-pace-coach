@@ -32,6 +32,7 @@ import torch.nn as nn
 
 import config
 import gbt_lib as gl
+import env_tools
 from report_notes import MACRO_NOTE
 
 _spec_m21 = importlib.util.spec_from_file_location("m21", "21_baseline_integrated_report.py")
@@ -222,18 +223,8 @@ def main():
 
     # ===== 0. 환경: MLPRegressor loss 제약 확인 + torch 버전/결정성 =====
     md.append("## 0. 환경\n")
-    try:  # 진단 기록 전용: 실패해도 결과 수치 경로(torch MLP)에는 영향 없음
-        from sklearn.neural_network import MLPRegressor
-        import inspect
-        sig = inspect.signature(MLPRegressor.__init__)
-        loss_param = sig.parameters.get("loss")
-        doc_excerpt = [line for line in MLPRegressor.__doc__.split("\n") if "loss :" in line or "squared_error" in line or "poisson" in line][:3]
-        md.append(f"- **sklearn.neural_network.MLPRegressor의 `loss` 파라미터 기본값/타입**: "
-                  f"`{loss_param.default!r}` (코드 기준, `inspect.signature` 확인)\n")
-        md.append(f"- **docstring 발췌**: {' / '.join(l.strip() for l in doc_excerpt)}\n")
-    except ImportError as e:
-        md.append(f"- (진단 생략) 이번 실행에서 sklearn import 실패(`{str(e)[:100]}`)로 MLPRegressor 코드 확인을 다시 하지 않았다. "
-                  "이전 실행에서의 확인 결과(sklearn 1.9.1): `loss`는 'squared_error'/'poisson'만 지원.\n")
+    md.append("- **sklearn.neural_network.MLPRegressor의 `loss` 파라미터**: 이전 실행에서 확인한 결과(sklearn 1.9.1, `inspect.signature`·docstring 기준) 기본값 `'squared_error'`, 선택지 `'squared_error'`/`'poisson'`뿐이다. 이번 실행의 재확인·import 진단은 문서에 쓰지 않고 `logs/sklearn_diagnostics.log`(git 제외)에 기록한다.\n")
+    env_tools.log_sklearn_probes("27_mlp_torch 0절")  # sklearn 진단은 logs/에만 기록(결과 수치 경로와 무관)
     md.append("- **확인됨**: MLPRegressor는 `loss ∈ {'squared_error', 'poisson'}`만 지원하고 "
               "**L1(절대오차) 손실 옵션이 없다.** 그래서 메인 모델에 쓰지 않고, torch로 직접 "
               "L1Loss 기반 MLP를 구현했다.\n")

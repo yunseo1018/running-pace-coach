@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 import config
+import env_tools
 import ridge_lib as rl
 
 
@@ -334,8 +335,15 @@ def main():
                     raise SystemExit(f"[중단] 불변 검증 실패: {split} {key} {what}: 재계산 {a:.4f} vs 문서 {b:.4f}")
         log("  [불변 검증] 그룹 (b)·median-5·레거시 6a의 MAE/RMSE/CI가 docs/model_comparison.md와 일치")
 
-        results[split] = {"preds": preds, "stats": stats, "draws": draws, "pts": pts, "y": y_te, "n_users": n_users,
+        results[split] = {"uid": uid_te, "sid": [s["target_session_id"] for s in te_s], "preds": preds, "stats": stats, "draws": draws, "pts": pts, "y": y_te, "n_users": n_users,
                           "n_win": n_te, "pace_median": float(np.median(y_te)), "mlp_seed_maes": seed_maes}
+
+    if "--save-predictions" in sys.argv:
+        # 3주차 6-6: 평가 행별 예측값 저장(선택 기능). 사용자·세션 ID는 고정 salt 해시로 대체, data/predictions/ 아래(git 제외).
+        for split in CUR_SPLITS:
+            r = results[split]
+            path = env_tools.save_predictions(split, r["uid"], r["sid"], r["y"], {k: np.asarray(v, dtype=float) for k, v in r["preds"].items()})
+            log(f"[예측값 저장] {path.relative_to(Path('.').resolve()) if path.is_absolute() else path} (git 제외, 가명화)")
 
     # ===================== 문서 =====================
     md.append("## 0. 15피처 모델 선택 결과 (CV/검증 MAE만 사용, 테스트 미사용)\n")

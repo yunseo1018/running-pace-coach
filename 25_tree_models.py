@@ -37,6 +37,7 @@ import scipy
 
 import config
 import ridge_lib as rl
+import env_tools
 from report_notes import MACRO_NOTE
 import gbt_lib as gl
 
@@ -117,29 +118,22 @@ def _param_key(params):
     return tuple(sorted(params.items())) if isinstance(params, dict) else params
 
 
-# ===================== Step 0: 환경 확인 + (진단용) sklearn 대조 =====================
+# ===================== Step 0: 환경 확인 (sklearn 진단은 문서에 쓰지 않고 logs/에 기록) =====================
 
 def check_environment_and_compare(md):
     """Ridge/GroupKFold/scaler는 import 성공 여부와 무관하게 항상 ridge_lib(numpy)를 쓴다(GBM을 gbt_lib로
-    고정한 것과 같은 방식). 아래 sklearn 대조는 **진단 기록용**이며 결과 수치 생성 경로에 영향을 주지 않는다:
-    sklearn import가 정책으로 차단돼도 대조만 생략하고 파이프라인은 그대로 진행한다."""
-    md.append("## 0. 환경 확인 + ridge_lib 고정 사용 (sklearn 대조는 진단용)\n")
+    고정한 것과 같은 방식). sklearn과의 대조·import 진단은 **문서 본문에 쓰지 않고** logs/sklearn_diagnostics.log
+    (git 제외)에만 기록한다 — 실행마다 달라지는 진단 줄 때문에 docs/가 바이트 단위로 달라지는 일을 막는다."""
+    md.append("## 0. 환경 확인 + ridge_lib 고정 사용\n")
     md.append(f"- python: {sys.version.split()[0]}\n")
     md.append("- **Ridge / GroupKFold / 표준화(scaler)는 항상 `ridge_lib.py`(numpy 직접 구현: `RidgePipeline`, "
               "`group_kfold_splits`, `ManualStandardScaler`)를 쓴다. sklearn import 성공 여부와 무관하다.** "
-              "(이전 버전은 sklearn Pipeline/GroupKFold를 썼다 — 아래 '고정 전후' 주석 참고.)\n")
-    md.append("- 아래 sklearn 대조는 진단 기록용이다. sklearn이 이번 실행에서 import되지 않으면 대조만 생략된다.\n")
+              "(이전 버전은 sklearn Pipeline/GroupKFold를 썼다.)\n")
     md.append(f"- numpy: {np.__version__}, scipy: {scipy.__version__}, pandas: {pd.__version__}\n")
     print(f"[환경] python={sys.version.split()[0]} numpy={np.__version__} scipy={scipy.__version__} pandas={pd.__version__}")
 
     rng = np.random.default_rng(0)
-    n, p = 300, 22
-    X_cmp = rng.normal(size=(n, p))
-    true_beta = rng.normal(size=p)
-    y_cmp = X_cmp @ true_beta + 3.0 + rng.normal(scale=0.1, size=n)
-    alpha_cmp = 1.0
-    beta_manual, intercept_manual = rl.ridge_fit(X_cmp, y_cmp, alpha=alpha_cmp)
-    pred_manual = rl.ridge_predict(X_cmp, beta_manual, intercept_manual)
+    n = 300
     user_ids_cmp = rng.integers(0, 50, size=n)
     manual_folds = list(rl.group_kfold_indices(user_ids_cmp, 5, 42))
 
@@ -159,43 +153,12 @@ def check_environment_and_compare(md):
         print("[중단] ridge_lib GroupKFold 겹침 != 0")
         sys.exit(1)
 
-    try:
-        import sklearn
-        from sklearn.linear_model import Ridge as SkRidge, HuberRegressor
-        from sklearn.model_selection import GroupKFold as SkGroupKFold
-    except ImportError as e:
-        md.append(f"- **sklearn 대조 생략(진단 전용)**: 이번 실행에서 sklearn import 실패(`{str(e)[:120]}`). "
-                  "결과 수치에는 영향 없음(모든 모델이 ridge_lib/gbt_lib). 과거 실행에서의 대조 결과는 이 문서의 이전 커밋 버전 참고"
-                  "(Ridge 계수 최대차이 8.88e-16, GroupKFold 겹침 0, fold 멤버십은 sklearn과 다름).\n\n")
-        print(f"[sklearn 대조 생략] {e}")
-        return
-
-    md.append(f"- sklearn: {sklearn.__version__} (진단용)\n")
-    sk_ridge = SkRidge(alpha=alpha_cmp).fit(X_cmp, y_cmp)
-    pred_sklearn = sk_ridge.predict(X_cmp)
-    coef_diff = float(np.abs(beta_manual - sk_ridge.coef_).max())
-    pred_diff = float(np.abs(pred_manual - pred_sklearn).max())
-    intercept_diff = float(abs(intercept_manual - sk_ridge.intercept_))
-    ridge_match = coef_diff < 1e-6 and pred_diff < 1e-6 and intercept_diff < 1e-6
-    md.append(f"- **Ridge 대조**(합성 데이터 n=300,p=22,alpha=1.0): 계수 최대차이={coef_diff:.2e}, "
-              f"intercept 차이={intercept_diff:.2e}, 예측값 최대차이={pred_diff:.2e} -> "
-              f"**{'일치' if ridge_match else '불일치'}** (<1e-6 기준)\n")
-    print(f"[Ridge 대조] coef_diff={coef_diff:.2e} pred_diff={pred_diff:.2e} intercept_diff={intercept_diff:.2e}")
-
-    sk_folds = list(SkGroupKFold(n_splits=5).split(X_cmp, y_cmp, groups=user_ids_cmp))
-    sk_val_sets = [set(user_ids_cmp[val_idx].tolist()) for _, val_idx in sk_folds]
-    sk_overlap = max_overlap(sk_val_sets)
-    exact_fold_match = sorted([frozenset(s) for s in sk_val_sets]) == sorted([frozenset(s) for s in manual_val_sets])
-    md.append(f"- **GroupKFold 대조**(같은 데이터, 5-fold): 겹침 sklearn={sk_overlap}, 수동구현={manual_overlap}. "
-              f"**fold 멤버십이 완전히 같은가 = {exact_fold_match}** (sklearn GroupKFold는 그룹 크기 기반 결정적 알고리즘이라 "
-              f"수동 구현(시드 셔플 후 균등분할)과 멤버십이 다를 수 있다. **이 차이 때문에 sklearn GroupKFold에서 ridge_lib로 "
-              f"고정하면 CV/검증 분할이 바뀌어 alpha·GBM 하이퍼파라미터 선택이 달라질 수 있다.**)\n")
-
-    hr = HuberRegressor(alpha=1e-4).fit(X_cmp, y_cmp)
-    beta_manual_huber, intercept_manual_huber, delta_manual = rl.huber_fit(X_cmp, y_cmp, alpha=1e-4)
-    corr = float(np.corrcoef(hr.coef_, beta_manual_huber)[0, 1])
-    sign_match = float(np.mean(np.sign(hr.coef_) == np.sign(beta_manual_huber)))
-    md.append(f"- **Huber 정성 비교**(정의가 달라 수치 일치는 기대 안 함): 계수 상관계수={corr:.3f}, 부호 일치 비율={sign_match:.1%}\n\n")
+    md.append("- **sklearn 대조(과거 기록, 7단계 최초 실행·sklearn 1.9.1 기준)**: ridge_lib와 sklearn Ridge의 계수 최대차이 8.88e-16, "
+              "GroupKFold 그룹 겹침은 둘 다 0, fold 멤버십은 sklearn과 달랐다(그래서 분할기를 바꾸면 CV/검증 분할이 달라질 수 있다 — `docs/mlp_results.md` 6절), "
+              "Huber 계수 상관계수 1.000·부호 일치 100%(정의가 달라 수치 일치는 기대하지 않음). "
+              "**이번 실행의 sklearn 대조·import 진단은 문서에 쓰지 않고 `logs/sklearn_diagnostics.log`(git 제외)에 기록한다.** "
+              "오류 기록은 `docs/sklearn_import_issue.md` 참고.\n\n")
+    env_tools.log_sklearn_ridge_comparison("25_tree_models 0절")
 
 
 def build_model_rows(test_samples, preds, label, y_key="y"):
@@ -231,15 +194,8 @@ def main():
 
 
     md.append("### 0-1. 추가 발견: sklearn.tree 차단(간헐적) -> gbt_lib.py로 직접 구현 고정 사용\n")
-    try:
-        from sklearn.ensemble import HistGradientBoostingRegressor as _ProbeHGB
-        sklearn_tree_importable_this_run = True
-        md.append("- 이번 실행에서 `from sklearn.ensemble import HistGradientBoostingRegressor` "
-                  "**성공**.\n")
-    except Exception as e:
-        sklearn_tree_importable_this_run = False
-        md.append(f"- 이번 실행에서 `from sklearn.ensemble import HistGradientBoostingRegressor` "
-                  f"**실패**: `{type(e).__name__}: {str(e)[:200]}`\n")
+    env_tools.log_sklearn_probes("25_tree_models 0-1절")  # 이번 실행의 import 성공/실패는 logs/에만 기록(문서에 쓰지 않음)
+    md.append("- 이번 실행의 sklearn import 성공/실패 진단은 문서 본문에 쓰지 않고 `logs/sklearn_diagnostics.log`에 기록한다(실행마다 달라지는 줄을 문서에서 제거).\n")
     md.append("- **중요(간헐적 현상 발견)**: sklearn.tree의 import 성공 여부가 **실행마다 달라진다** "
               "— 처음 발견했을 때는 3회 재시도 모두 실패했고(DecisionTree/RandomForest/"
               "GradientBoosting/HistGradientBoosting 전부), 이번 보완 작업 중 재확인하니 성공하는 "
@@ -250,8 +206,6 @@ def main():
               "방식을 그대로 유지해 실행마다 결과가 달라지는 것을 막는다(실제로 이 고정을 하기 "
               "전, sklearn이 우연히 import된 회차에서 real sklearn HistGradientBoostingRegressor가 "
               "조용히 쓰여 수치가 미세하게 달라지는 재현성 문제를 직접 겪었다).\n")
-    print(f"[0-1] 이번 실행 sklearn.tree import 성공={sklearn_tree_importable_this_run} "
-          f"(결과와 무관하게 gbt_lib.py 고정 사용)")
 
     gbt_check = gl._validate_gbt_sanity()
     for loss, r in gbt_check["loss_results"].items():
@@ -1135,22 +1089,12 @@ def main():
     # ===== 7. 환경 확인 (8단계 사전 체크, 설치/변경 없음) =====
     print("\n7. 8단계(MLP) 사전 환경 확인 중 (설치/변경 없음)...")
     md.append("\n## 7. 환경 확인 (8단계 사전 체크용, 설치/변경 없음 — 8단계 시작은 사용자 결정 대기)\n")
-    for mod_desc, import_fn in [
-        ("import torch", lambda: __import__("torch")),
-        ("from sklearn.neural_network import MLPRegressor", lambda: __import__("sklearn.neural_network", fromlist=["MLPRegressor"])),
-        ("from sklearn.linear_model import QuantileRegressor", lambda: __import__("sklearn.linear_model", fromlist=["QuantileRegressor"])),
-    ]:
-        try:
-            mod = import_fn()
-            version = getattr(mod, "__version__", None)
-            md.append(f"- `{mod_desc}`: **성공**{f' (version={version})' if version else ''}\n")
-            print(f"  {mod_desc}: OK")
-        except Exception as e:
-            md.append(f"- `{mod_desc}`: **실패** `{type(e).__name__}: {str(e)[:200]}`\n")
-            print(f"  {mod_desc}: FAIL - {e}")
+    import torch as _torch_probe  # torch는 필수 의존성(성공해야 함)
+    md.append(f"- `import torch`: **성공** (version={_torch_probe.__version__})\n")
+    md.append("- sklearn `MLPRegressor`/`QuantileRegressor` import 진단은 문서에 쓰지 않고 `logs/sklearn_diagnostics.log`에 기록한다(sklearn은 이 파이프라인의 결과에 쓰이지 않음).\n")
+    env_tools.log_sklearn_probes("25_tree_models 7절")
     md.append("\n8단계(MLP) 진행 여부는 사용자가 이 결과를 보고 결정한다 — 이번 커밋에서 8단계는 "
               "시작하지 않는다.\n")
-
     OUTPUT_MD_PATH.write_text("".join(md), encoding="utf-8")
     print(f"\n최종 저장 완료: {OUTPUT_MD_PATH.resolve()}")
     return {"any_beats": any_beats, "best_model_per_split": best_model_per_split, "ALL_LABELS": ALL_LABELS}

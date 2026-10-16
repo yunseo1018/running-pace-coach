@@ -2,16 +2,15 @@
 
 입력 메인 데이터: `data\run_sessions_deduped_merged.pkl` (세션 105709건, 사용자 854명, assert 통과)
 
-## 0. 환경 확인 + ridge_lib 고정 사용 (sklearn 대조는 진단용)
+## 0. 환경 확인 + ridge_lib 고정 사용
 - python: 3.14.7
-- **Ridge / GroupKFold / 표준화(scaler)는 항상 `ridge_lib.py`(numpy 직접 구현: `RidgePipeline`, `group_kfold_splits`, `ManualStandardScaler`)를 쓴다. sklearn import 성공 여부와 무관하다.** (이전 버전은 sklearn Pipeline/GroupKFold를 썼다 — 아래 '고정 전후' 주석 참고.)
-- 아래 sklearn 대조는 진단 기록용이다. sklearn이 이번 실행에서 import되지 않으면 대조만 생략된다.
+- **Ridge / GroupKFold / 표준화(scaler)는 항상 `ridge_lib.py`(numpy 직접 구현: `RidgePipeline`, `group_kfold_splits`, `ManualStandardScaler`)를 쓴다. sklearn import 성공 여부와 무관하다.** (이전 버전은 sklearn Pipeline/GroupKFold를 썼다.)
 - numpy: 2.5.3, scipy: 1.18.1, pandas: 3.0.6
-- **ridge_lib 자체 검증**: GroupKFold 수동구현 fold간 그룹 겹침=0(0이어야 함, 통과), fold별 그룹 수=[10, 10, 10, 10, 9]
-- **sklearn 대조 생략(진단 전용)**: 이번 실행에서 sklearn import 실패(`DLL load failed while importing _pava_pybind: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`). 결과 수치에는 영향 없음(모든 모델이 ridge_lib/gbt_lib). 과거 실행에서의 대조 결과는 이 문서의 이전 커밋 버전 참고(Ridge 계수 최대차이 8.88e-16, GroupKFold 겹침 0, fold 멤버십은 sklearn과 다름).
+- **ridge_lib 자체 검증**: GroupKFold 수동구현 fold간 그룹 겹침=0(0이어야 함, 통과), fold별 그룹 수=[10, 10, 10, 10, 10]
+- **sklearn 대조(과거 기록, 7단계 최초 실행·sklearn 1.9.1 기준)**: ridge_lib와 sklearn Ridge의 계수 최대차이 8.88e-16, GroupKFold 그룹 겹침은 둘 다 0, fold 멤버십은 sklearn과 달랐다(그래서 분할기를 바꾸면 CV/검증 분할이 달라질 수 있다 — `docs/mlp_results.md` 6절), Huber 계수 상관계수 1.000·부호 일치 100%(정의가 달라 수치 일치는 기대하지 않음). **이번 실행의 sklearn 대조·import 진단은 문서에 쓰지 않고 `logs/sklearn_diagnostics.log`(git 제외)에 기록한다.** 오류 기록은 `docs/sklearn_import_issue.md` 참고.
 
 ### 0-1. 추가 발견: sklearn.tree 차단(간헐적) -> gbt_lib.py로 직접 구현 고정 사용
-- 이번 실행에서 `from sklearn.ensemble import HistGradientBoostingRegressor` **실패**: `ImportError: DLL load failed while importing _pava_pybind: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`
+- 이번 실행의 sklearn import 성공/실패 진단은 문서 본문에 쓰지 않고 `logs/sklearn_diagnostics.log`에 기록한다(실행마다 달라지는 줄을 문서에서 제거).
 - **중요(간헐적 현상 발견)**: sklearn.tree의 import 성공 여부가 **실행마다 달라진다** — 처음 발견했을 때는 3회 재시도 모두 실패했고(DecisionTree/RandomForest/GradientBoosting/HistGradientBoosting 전부), 이번 보완 작업 중 재확인하니 성공하는 경우도 나왔다(원인 미확인 — Windows Application Control Policy의 캐시/타이밍 문제로 추정하나 검증 안 함). lightgbm/xgboost는 여전히 미설치·설치 금지.
 - **그래서 이번 실행의 import 성공 여부와 무관하게, 코드가 항상 `gbt_lib.py`(numpy 직접구현)를 쓰도록 고정했다** — 사용자 확인을 받고 이미 커밋된(690b93f) 방식을 그대로 유지해 실행마다 결과가 달라지는 것을 막는다(실제로 이 고정을 하기 전, sklearn이 우연히 import된 회차에서 real sklearn HistGradientBoostingRegressor가 조용히 쓰여 수치가 미세하게 달라지는 재현성 문제를 직접 겪었다).
   - gbt_lib 자체 검증(squared_error): 학습손실 791.574 -> 13.082, 반복마다 단조감소=True (최대 증가분 -7.40e-02)
@@ -420,7 +419,6 @@ personalized는 '제외 3 / 추가 1'로 숫자가 안 맞는 것처럼 보이�
 
 ## 7. 환경 확인 (8단계 사전 체크용, 설치/변경 없음 — 8단계 시작은 사용자 결정 대기)
 - `import torch`: **성공** (version=2.14.0+cpu)
-- `from sklearn.neural_network import MLPRegressor`: **실패** `ImportError: DLL load failed while importing _qmvnt_cy: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`
-- `from sklearn.linear_model import QuantileRegressor`: **실패** `ImportError: DLL load failed while importing _rank_filter_1d: 애플리케이션 제어 정책에서 이 파일을 차단했습니다.`
+- sklearn `MLPRegressor`/`QuantileRegressor` import 진단은 문서에 쓰지 않고 `logs/sklearn_diagnostics.log`에 기록한다(sklearn은 이 파이프라인의 결과에 쓰이지 않음).
 
 8단계(MLP) 진행 여부는 사용자가 이 결과를 보고 결정한다 — 이번 커밋에서 8단계는 시작하지 않는다.
