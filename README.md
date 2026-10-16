@@ -86,6 +86,11 @@
 - 그룹 (b): cold-start 풀링 MAE에서 (d)·MLP22·GBM22는 서로 구분되지 않고, personalized에서는 MLP22만 (d)보다 유의하게 낮습니다(+0.778 [+0.347, +1.403]). (d)는 9단계 결과를 본 뒤 추가한 탐색적 baseline입니다.
 - 모든 CI는 사용자 단위 cluster bootstrap(2000회, seed 42)이며, CI가 0을 포함하는 비교는 동등성의 입증이 아닙니다.
 
+### 10월 3주차 4~6번 요약
+- **4번 코칭 판정 보류 (합성 시나리오)** — [`docs/coaching_definition.md`](docs/coaching_definition.md), [`docs/coaching_abstain_results.md`](docs/coaching_abstain_results.md): 80%/90% 구간(예측 ± 절대 잔차 분위수)의 하·상한이 같은 범주일 때만 판정하면 **보류율이 96.4~99.3%**(구간 폭 103~195초/km가 범주 폭 20~23초/km보다 훨씬 넓음)이고 보류가 코칭 품질 향상을 뜻하지 않습니다. 결과를 본 뒤 추가한 통제에서 판정된 윈도우(대부분 "앞서감")의 불일치율은 같은 윈도우의 상수 규칙과 대체로 구분되지 않았습니다.
+- **5번 극단 세션 ↔ 윈도우** — [`docs/extreme_session_window_map.md`](docs/extreme_session_window_map.md): 극단 세션 826건(0.781%)은 평가 윈도우의 약 3~4%에 관여하고 제곱오차 상위 1% 윈도우가 SSE의 92~94%를 차지하며, 그 중 타깃이 극단인 윈도우가 59~84%입니다(**집계 단위가 달라 세션 비율과 윈도우 기여를 직접 비교할 수 없음**). 극단 세션의 분류는 병합 1.3%·정지 비율≥0.5 27.8%·1km 미만 29.2%·미분류 47.5%(중복 집계, GPS 오류·중복 흔적은 세션 표로 판정 불가). 인과 해석은 하지 않습니다.
+- **6번 재현성** — [`docs/environment.md`](docs/environment.md), [`docs/sklearn_import_issue.md`](docs/sklearn_import_issue.md): `run_all.py`, 해시 키 캐시, 진단 줄의 `logs/` 분리, 환경·데이터·분할·하이퍼파라미터 해시 기록, `requirements.txt`, 가명화 예측값 내보내기(git 제외).
+
 ### 코칭 평가 (합성 시나리오 — 실제 사용자 목표 기반 성능이 아님)
 
 데이터에 사용자가 입력한 실제 목표가 없어 목표 비율(3/5/10%), 데드라인(8주, 민감도 4주), 카테고리 임계값(±3%, +10%)은 모두 결과를 보기 전에 고정한 합성 설정입니다. 판정 불일치율(실제 페이스로 판정한 카테고리와 다른 비율)은 median-5 제외 62~67% 수준이고, 주당 체크포인트 이동(약 2초/km)이 예측 오차(MAE 약 55~60초/km)보다 훨씬 작아 판정은 예측 오차와 러닝 간 변동에 좌우됩니다. 학습/이력 구간에서 정한 상수 규칙 대비 GBM/MLP는 cold-start에서 구분되지 않고 personalized에서 약 3.6~4.1%p 낮았습니다(`docs/coaching_results.md`). median-5 대비 감소폭은 현재 실력을 median-5로 정의한 시나리오의 구조 효과라 결과로 인용하지 않습니다.
@@ -102,34 +107,39 @@
 
 ## 재현 방법
 
-환경(이 프로젝트에서 사용한 버전): Python 3.14.7, numpy 2.5.3, pandas 3.0.6, scikit-learn 1.9.1, torch 2.14.0 (CPU).
+환경(검증한 버전, 자세한 기록과 데이터·분할·하이퍼파라미터 해시는 [`docs/environment.md`](docs/environment.md)): Python 3.14.7, numpy 2.5.3, pandas 3.0.6, scipy 1.18.1, torch 2.14.0 (CPU). **scikit-learn은 필요하지 않다**(진단 로그 전용; 설치돼 있어도 결과에 영향 없음).
 
 ```bash
-pip install pandas numpy torch scikit-learn
+pip install -r requirements.txt
 # endomondoHR.json 을 프로젝트 루트에 둔다 (저장소에 포함되지 않음)
 python 01_parse_run_sessions.py      # 러닝 세션 추출 -> data/
-# 02~04, 06, 16~17 등 데이터/중복제거/병합 단계 스크립트를 번호순으로 실행 (각 스크립트 docstring에 입출력 명시)
-python 21_baseline_integrated_report.py
-python 23_ridge_regression.py
-python 24_build_xy_dataset_extended.py
-python 25_tree_models.py
-python 27_mlp_torch.py
-python 28_model_comparison.py
-python 30_ridge_discrepancy.py   # Ridge 15피처 수치 차이 분해 (docs/ridge_discrepancy.md)
-python 29_coaching.py
+# 02~04, 06, 16~18, 21, 23, 24 등 데이터/중복제거/병합/확장 피처 단계 스크립트를 번호순으로 실행 (각 스크립트 docstring에 입출력 명시)
+python run_all.py                    # 결과 문서 재생성: 27 → 28 → 29 → 31 → 32 (기본)
 ```
 
+`run_all.py` 옵션과 예상 소요 시간(24코어 Windows CPU, 다른 전체 실행 1건이 동시에 돌던 상태에서 측정한 값이며 참고용):
+
+| 명령 | 포함 단계 | 예상 소요 |
+|---|---|---|
+| `python run_all.py` | 27(MLP) 7.5분, 28(종합표) 0.9분, 29(코칭) 0.8분, 31(동일 입력 범위 비교) 14.5분, 32(판정 보류) 2.8분 | 약 27분 |
+| `python run_all.py --all` | 위 + 25(트리) 20.7분, 30(Ridge 차이 분해) 0.1분, 33(극단 세션 대응) 0.9분 | 약 48분 |
+| `python run_all.py --only 28,29` | 지정한 단계만(순서는 고정 순서 유지) | 단계별 합 |
+| `python run_all.py --check` | 각 단계 후 결과 문서를 git HEAD 문서와 대조(IDENTICAL / 진단 줄만 다름 / 텍스트만 다름 / 숫자 변경) | — |
+| `python run_all.py --repeat 2` | 같은 실행을 2회 반복하고 `docs/` 전체가 바이트 단위로 같은지 확인 | 2배 |
+| `python run_all.py --save-predictions` | 31번이 `data/predictions/`에 평가 행별 예측값 저장(사용자·세션 ID는 고정 salt 해시, **git 제외**, 파일별 sha256은 `docs/environment.md`) | — |
+
+- 27번이 저장하는 `docs/mlp_selected_hyperparams.json`(하이퍼파라미터만)을 28·29·31·32·33번이 읽습니다. `run_all.py`는 이 의존을 확인하고 27번 이후 JSON 해시가 바뀌면 중단합니다. 29번의 예측 캐시는 레포 밖에 두며, 관련 스크립트·`gbt_lib`·`ridge_lib`·JSON·데이터 파일의 해시가 하나라도 다르면 자동으로 재계산합니다.
 - 메인 분석은 `data/run_sessions_deduped_merged.pkl`(중복 제거 → 병합 적용) 기준이며 각 스크립트가 시작 시 세션/사용자 수를 assert로 검증합니다(`config.py`).
 - 스크립트 번호 중 12, 26은 없습니다(결번). 정확한 실행 의존 순서는 각 스크립트 docstring을 기준으로 하고, 이 README에 적은 순서는 요약입니다.
-- Windows에서 한글 출력/파일을 다룰 때 `python -X utf8 스크립트.py` 사용을 권장합니다.
-- `sklearn.tree` import가 실행마다 달라질 수 있으나 파이프라인은 `gbt_lib.py`를 고정 사용하므로 결과는 영향을 받지 않습니다(3회 별도 프로세스 실행으로 비트 단위 동일 확인).
-- **Ridge / GroupKFold / 표준화는 sklearn import 성공 여부와 무관하게 항상 `ridge_lib.py`(numpy)를 쓰고, GBM은 `gbt_lib.py`를 씁니다**(재현성 고정; sklearn 대조는 진단 기록용이며 차단되면 생략). 실행 순서: `27_mlp_torch.py`가 저장하는 `docs/mlp_selected_hyperparams.json`(MLP 하이퍼파라미터만, 사용자 ID·행별 예측 없음)을 `28_model_comparison.py`/`29_coaching.py`가 읽으므로 27 → 28 → 29 순서로 실행해야 합니다.
+- Windows에서 한글 출력/파일을 다룰 때 `python -X utf8 스크립트.py` 사용을 권장합니다(`run_all.py`는 자동 적용).
+- **Ridge / GroupKFold / 표준화는 항상 `ridge_lib.py`(numpy), GBM은 `gbt_lib.py`, MLP는 torch**입니다. sklearn import 진단은 문서 본문이 아니라 `logs/sklearn_diagnostics.log`(git 제외)에 기록하고, 오류 기록은 [`docs/sklearn_import_issue.md`](docs/sklearn_import_issue.md)에 있습니다(24회 시도 중 1회 `sklearn.tree` 계열에서 `DLL load failed` 재현, 경로는 마스킹).
+- 같은 명령을 서로 다른 디렉터리에서 두 번 전체 실행(`--all`)했을 때 `docs/`의 20개 파일(시점이 들어가는 `sklearn_import_issue.md` 제외)과 예측값 CSV가 바이트 단위로 같음을 확인했습니다.
 - 데이터 캐시(`data/`)는 원본에서 다시 만들 수 있는 파생 데이터라 커밋하지 않습니다.
-- **감사 대응표/샘플 CSV(`docs/merge_audit/`)는 저장소에 포함하지 않으며(원본 파생 사용자·세션 ID 목록), `13_merge_audit.py`, `14_overlap_exclusion_audit.py`, `16_duplicate_dedup.py` 실행으로 재생성할 수 있습니다.**
+- **감사 대응표/샘플 CSV(`docs/merge_audit/`)는 저장소에 포함하지 않으며(원본 파생 사용자·세션 ID 목록), `13_merge_audit.py`, `14_overlap_exclusion_audit.py`, `16_duplicate_dedup.py` 실행으로 재생성할 수 있습니다.** 극단 세션 ↔ 윈도우 세션 단위 대응표(`33_extreme_session_map.py`)도 `data/`에만 저장합니다.
 
 ## 저장소 구성
 
-- `config.py` 경로·상수·메인 데이터 검증 / `gbt_lib.py` numpy GBM / `ridge_lib.py` numpy Ridge / `coaching_lib.py` 코칭 모듈
+- `config.py` 경로·상수·메인 데이터 검증 / `gbt_lib.py` numpy GBM / `ridge_lib.py` numpy Ridge / `coaching_lib.py` 코칭 모듈 / `run_all.py` 결과 재생성 실행기 / `env_tools.py` 환경 기록·진단 도구
 - `NN_*.py` 단계별 스크립트 / `docs/` 단계별 결과·감사 문서 / `CLAUDE.md` 작업 규칙
 
 ## 라이선스
