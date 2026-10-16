@@ -139,6 +139,7 @@ def main():
               f"assert 통과). 평가 윈도우는 7~9단계와 동일(24단계 확장 피처 윈도우), 모델은 9단계와 같은 하이퍼파라미터로 refit"
               f"(재탐색 없음, 9단계 MAE와 일치하는지 assert로 확인).\n\n")
 
+    md.append("**관련 문서 (3주차 4번)**: 판정 정의 [`coaching_definition.md`](coaching_definition.md), 범주별 건수·혼동행렬·판정 보류 실험 [`coaching_abstain_results.md`](coaching_abstain_results.md).\n\n")
     md.append("## 0. 설계 (사전 고정 — 결과를 보고 바꾸지 않음)\n")
     md.append("- **합성 목표**: 현재 실력 = 윈도우의 median-5(과거 5세션만 사용), 목표 페이스 = 현재 실력 × (1−delta), "
               "delta ∈ {3%, 5%, 10%}, 데드라인 8주(민감도: 4주). 목표 거리는 문구 표시용(윈도우 과거 5세션 평균 거리)이며 판정에 쓰지 않는다.\n")
