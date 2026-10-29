@@ -33,7 +33,7 @@ REQUIRED_COLS = ["start_time", "end_time", "distance_km", "duration_sec", "avg_h
 
 def load_params(path=PARAMS_PATH):
     p = json.loads(Path(path).read_text(encoding="utf-8"))
-    for k in ("a", "b", "resid_q10", "resid_q90"):
+    for k in ("a", "b", "resid_q10", "resid_q90", "test_coverage_cold"):
         float(p[k])
     return p
 
@@ -88,7 +88,9 @@ def assess(sessions, asof, params):
     if len(past) == 1:
         m = ref
     y_hat = predict_change(ref, m, params)
-    res.update(ref=ref, m=m, y_hat=y_hat, pred=ref + y_hat,
+    res.update(ref=ref, m=m, y_hat=y_hat, pred=ref + y_hat, a_term=params["a"], b_term=params["b"] * (ref - m),
+               a_int=int(round(params["a"])), tot_int=int(round(y_hat)), b_int=int(round(y_hat)) - int(round(params["a"])),
+               cov=params["test_coverage_cold"],
                lo=ref + y_hat + params["resid_q10"], hi=ref + y_hat + params["resid_q90"])
     return res
 
@@ -105,6 +107,16 @@ def mmss(sec):
     return "%s%02d:%02d" % (sign, t // 60, t % 60)
 
 
+def signed(sec):
+    """부호 있는 정수 초 표기(반올림). 예: -15, +113."""
+    t = int(round(sec))
+    return ("+%d" % t) if t > 0 else ("−%d" % abs(t) if t < 0 else "0")
+
+
+def cov_text(res):
+    return "%.1f%%" % (100.0 * res["cov"])
+
+
 def format_report(res):
     if not res["eligible"]:
         return "예측할 수 없습니다. 부족한 조건:\n" + "\n".join("- " + s for s in res["shortfalls"])
@@ -116,17 +128,24 @@ def format_report(res):
         trend = "직전 기록이 평소보다 %d초 빨랐기 때문에 평소 쪽으로 돌아오는 경향을 반영했습니다." % n
     else:
         trend = "직전 기록이 평소와 같아 평소 쪽으로 돌아오는 보정이 거의 없습니다."
-    return ("다음 7일 안 5km 예상 기록: %s (80%% 범위 %s ~ %s)\n" % (mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"]))
+    a = res["a_int"]
+    avg_dir = "빨랐음" if a < 0 else "느렸음"
+    return ("다음 7일 안 5km 예상 기록: %s (80%% 범위(학습 잔차 기준, 테스트 실제 포함률 %s) %s ~ %s)\n"
+            % (mmss(res["pred"]), cov_text(res), mmss(res["lo"]), mmss(res["hi"]))
             + "평소 기록(과거 중앙값): %s, 직전 기록: %s\n" % (mmss(res["m"]), mmss(res["ref"]))
+            + "예상 변화 %s초 = 평균 변화량 a(약 %s초) + 평소 대비 이번 기록 보정 b×(기준 기록 − 평소)(%s초)\n"
+            % (signed(res["tot_int"]), signed(a), signed(res["b_int"]))
+            + "학습 데이터에서 다음 7일 첫 5km는 평균적으로 약 %d초 %s(상관, 인과 아님).\n" % (abs(a), avg_dir)
             + trend + "\n"
             + "검증 결과 지난 4주의 거리·횟수 정보는 이 예측을 더 좋게 만들지 못해(49c02f8) 평균 회귀 규칙만 사용합니다.\n"
             + "이 예측은 원인 분석이 아니며, 주마다 기록이 크게 흔들릴 수 있습니다.")
 
 
+# 각 항은 정수 초로 반올림하되 보정 항 = 예상 변화 − a 항으로 맞춰 합이 어긋나 보이지 않게 한다(최대 1초 차이).
 # 템플릿에 고정된 숫자(다음 7일, 5km, 80%, 지난 4주, 28일, 4회)와 커밋 해시. 계산값이 아니므로 따로 허용한다.
 TEMPLATE_INTS = {"4", "5", "7", "28", "80"}
 HASH = "49c02f8"
-_TOKEN = re.compile(r"49c02f8|-?\d+:\d{2}|\d+")
+_TOKEN = re.compile(r"49c02f8|\d+:\d{2}|\d+\.\d+|\d+")
 
 
 def check_numbers(text, res):
@@ -143,11 +162,24 @@ def check_numbers(text, res):
     found = [t for t in tokens if ":" in t]
     if found != needed:
         raise ValueError("시간 표기가 계산값과 다름: %s != %s" % (found, needed))
-    ints = {str(abs(ref_s - m_s))} | TEMPLATE_INTS
+    a_i = abs(res["a_int"])
+    if res["a_int"] + res["b_int"] != res["tot_int"]:
+        raise ValueError("a 항 + 보정 항 != 예상 변화(반올림 후)")
+    strip = "+-−"
+    must = {"차이": str(abs(ref_s - m_s)), "예상 변화": signed(res["tot_int"]).lstrip(strip), "a": signed(res["a_int"]).lstrip(strip),
+            "b 보정": signed(res["b_int"]).lstrip(strip), "포함률": cov_text(res).rstrip("%")}
+    ints = set(must.values()) | TEMPLATE_INTS | {str(a_i)}
     for t in tokens:
         if t != HASH and ":" not in t and t not in ints:
             raise ValueError("계산값과 맞지 않는 숫자: " + t)
-    if ref_s != m_s and str(abs(ref_s - m_s)) not in tokens:
+    # 필수 항목이 문구에 실제로 있는지(차이는 같을 때 제외)
+    expect_lines = {"포함률": "실제 포함률 %s)" % cov_text(res), "예상 변화": "예상 변화 %s초" % signed(res["tot_int"]),
+                    "a": "a(약 %s초)" % signed(res["a_int"]), "b 보정": "기준 기록 − 평소)(%s초)" % signed(res["b_int"]),
+                    "평균": "평균적으로 약 %d초" % a_i}
+    for k, frag in expect_lines.items():
+        if frag not in text:
+            raise ValueError("문구에 계산값이 없음: " + k)
+    if ref_s != m_s and (" %d초 " % abs(ref_s - m_s)) not in text:
         raise ValueError("직전-평소 차이(초)가 문구에 없음")
     return True
 

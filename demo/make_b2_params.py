@@ -53,11 +53,6 @@ def main():
     assert round(a, 2) == float(m.group(1)) and round(b, 3) == float(m.group(2)), (a, b, m.groups())
     res = y - (a + b * x)
     q10, q90 = (float(v) for v in np.percentile(res, [10, 90]))
-    params = {"model": "B2 (평균 회귀, LAD)", "source": "49c02f8 cold-start 최종 적합(train 평가 대상 1,720개)", "a": a, "b": b,
-              "resid_q10": q10, "resid_q90": q90, "interval_label": "80% 범위(학습 자료 B2 잔차의 10%·90% 분위수)",
-              "n_train": int(len(tr)), "band_sec": BAND}
-    PARAMS.write_text(json.dumps(params, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
-
     # ---- 사후 점검: 49c02f8 평가 행
     d, _tr, te, grp, cache = m43.load_base()
     ds = m43.main_dataset(d, grp, cache)
@@ -77,6 +72,12 @@ def main():
             s = pd.DataFrame({"uid": saved["cold"]["uid"], "t": saved["cold"]["t"], "p": saved["cold"]["preds"]["B2"]}).sort_values(["uid", "t"])
             e = pd.DataFrame({"uid": ev.uid, "t": ev.t, "p": pred}).sort_values(["uid", "t"])
             assert np.allclose(s.p.to_numpy(), e.p.to_numpy())
+    params = {"model": "B2 (평균 회귀, LAD)", "source": "49c02f8 cold-start 최종 적합(train 평가 대상 1,720개)", "a": a, "b": b,
+              "resid_q10": q10, "resid_q90": q90, "interval_label": "80% 범위(학습 자료 B2 잔차의 10%·90% 분위수)",
+              "n_train": int(len(tr)), "band_sec": BAND,
+              "test_coverage_cold": rows[0][3], "n_test_cold": int(rows[0][1])}
+    PARAMS.write_text(json.dumps(params, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+
     lines = ["# 데모 80% 범위 사후 점검 (cold-start test · personalized)", "",
              "생성: `demo/make_b2_params.py`. **사후 점검**이다(범위는 학습 자료로만 정했고, 점검 결과를 보고 범위·모델을 바꾸지 않는다). 주 결론(49c02f8)을 바꾸지 않으며 상관 기반 예측의 불확실성 표시일 뿐 원인 분석이 아니다. ID·행 값은 싣지 않았다.", "",
              f"- B2: a = {a:.3f}초, b = {b:.4f} (cold-start 학습 자료 1,720개에서 LAD). 정답 y = 다음 5km 기록 − 기준 기록(초).",

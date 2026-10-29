@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import coach_demo as cd  # noqa: E402
 
-P = {"a": -15.0, "b": -0.8, "resid_q10": -200.0, "resid_q90": 280.0}
+P = {"a": -15.0, "b": -0.8, "resid_q10": -200.0, "resid_q90": 280.0, "test_coverage_cold": 0.739}
 ASOF = 100 * cd.DAY
 
 
@@ -86,6 +86,23 @@ def test_number_check_passes_and_catches_mismatch():
         pass
     else:
         raise AssertionError("시간 불일치를 잡지 못함")
+
+
+def test_two_term_split_and_coverage_text():
+    sess = [S(1), S(5), S(9), S(20, 5.2, 1400), S(2, 5.1, 1500)]
+    r = cd.assess(sess, ASOF, P)
+    assert r["a_int"] == -15 and r["b_int"] == -40 and r["tot_int"] == -55      # -15 + (-0.8 x 50)
+    text = cd.format_report(r)
+    assert "평균 변화량 a(약 −15초)" in text and "(−40초)" in text and "예상 변화 −55초" in text
+    assert "테스트 실제 포함률 73.9%" in text and "80% 범위(학습 잔차 기준" in text
+    assert "평균적으로 약 15초 빨랐음(상관, 인과 아님)" in text
+    # 항을 바꾸면 검사에서 걸린다
+    for old, new in [("(−40초)", "(−41초)"), ("73.9%", "74.0%"), ("약 15초 빨랐음", "약 16초 빨랐음")]:
+        try:
+            cd.check_numbers(text.replace(old, new), r)
+        except ValueError:
+            continue
+        raise AssertionError("검사를 통과함: " + old)
 
 
 def test_ineligible_text_lists_only_shortfalls():
