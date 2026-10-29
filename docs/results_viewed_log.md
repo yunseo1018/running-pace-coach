@@ -43,3 +43,9 @@
 - 3절의 "최종 확인용 자료" 결정은 `docs/predeclaration_5km_final.md` 20항으로 확정됨(기존 test 그대로 사용).
 - train 내부 모델 비교(Ridge·GBM·MLP × 입력 3종)의 폴드 밖 사용자 평균 MAE·풀링 MAE·방향 일치율, 모델(기본) − B2 및 추가 입력 − 기본 쌍대 차이, 격자 전체 점수를 열람했다(`docs/model_cv_results_5km.md`, 사전 선언 보충 9fb0d8f 이후). test는 사용하지 않았다.
 - E-MLP(탐색적, 평가 동결 f1857fb 이후)의 train 내부 폴드 밖 결과(사용자 평균 MAE·풀링 MAE·방향 일치율, E-MLP − B2 및 − 기존 MLP 차이, 선택 에폭 분포)를 열람했다(`docs/model_cv_results_5km.md` 7절). test는 사용하지 않았다.
+
+## 6. test·personalized 1회 평가 실행 (평가 동결 `freeze-5km-v1`, f1857fb 이후)
+
+- 실행: `42_final_eval_5km.py`를 동결된 방법·목록 그대로 1회 실행(실행 전 dry-run은 test 정답 없이 train 사용자만 사용). 결과 커밋 `49c02f8`, 결과 문서 `docs/final_results_5km.md`. 재실행 방지 표식 파일 생성.
+- 열람한 자료: cold-start test 평가 대상(352개·71명)의 정답 y 요약과 모든 방법의 지표, personalized 평가 대상(442개·250명, test 사용자 78개 포함)의 같은 지표. 이 시점부터 test의 정답 y와 T5는 결과를 본 자료다.
+- 이후 이 두 평가 자료로 모델·설정·정의를 바꾸지 않는다. 추가 분석은 모두 "사후 분석"으로 표시한다.
