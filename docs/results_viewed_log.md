@@ -42,3 +42,4 @@
 
 - 3절의 "최종 확인용 자료" 결정은 `docs/predeclaration_5km_final.md` 20항으로 확정됨(기존 test 그대로 사용).
 - train 내부 모델 비교(Ridge·GBM·MLP × 입력 3종)의 폴드 밖 사용자 평균 MAE·풀링 MAE·방향 일치율, 모델(기본) − B2 및 추가 입력 − 기본 쌍대 차이, 격자 전체 점수를 열람했다(`docs/model_cv_results_5km.md`, 사전 선언 보충 9fb0d8f 이후). test는 사용하지 않았다.
+- E-MLP(탐색적, 평가 동결 f1857fb 이후)의 train 내부 폴드 밖 결과(사용자 평균 MAE·풀링 MAE·방향 일치율, E-MLP − B2 및 − 기존 MLP 차이, 선택 에폭 분포)를 열람했다(`docs/model_cv_results_5km.md` 7절). test는 사용하지 않았다.
