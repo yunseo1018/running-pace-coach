@@ -49,3 +49,7 @@
 - 실행: `42_final_eval_5km.py`를 동결된 방법·목록 그대로 1회 실행(실행 전 dry-run은 test 정답 없이 train 사용자만 사용). 결과 커밋 `49c02f8`, 결과 문서 `docs/final_results_5km.md`. 재실행 방지 표식 파일 생성.
 - 열람한 자료: cold-start test 평가 대상(352개·71명)의 정답 y 요약과 모든 방법의 지표, personalized 평가 대상(442개·250명, test 사용자 78개 포함)의 같은 지표. 이 시점부터 test의 정답 y와 T5는 결과를 본 자료다.
 - 이후 이 두 평가 자료로 모델·설정·정의를 바꾸지 않는다. 추가 분석은 모두 "사후 분석"으로 표시한다.
+
+## 7. 사후 분석·민감도 열람 (49c02f8 이후, 사양 49b5f2b)
+
+- 같은 사람 안 분석·공백 코호트(`docs/within_person_results_5km.md`, 사후 분석)와 사전 지정 민감도 S1~S5(`docs/sensitivity_results_5km.md`)를 실행·열람했다. 두 평가 자료(test·personalized)의 정답을 본 뒤의 분석이므로 이 결과로 주 결론(49c02f8)·모델·설정을 바꾸지 않는다.
