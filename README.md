@@ -1,15 +1,142 @@
-# 러닝 페이스 예측 및 목표 기반 코칭 (연구 프로젝트)
+# 5km 기록 변화 예측과 '정직한 기대치 코치'
+
+서강대학교 가상융합전문대학원 「AX 이론과 활용」 수업 프로젝트입니다(FitRec/Endomondo 러닝 기록 사용).
+
+**연구 질문**: 지난 4주 동안 몇 번, 얼마나 멀리, 얼마나 쉬면서 달렸는지로 다음 7일 안 5km 기록의 변화를 예측할 수 있는가(상관관계까지만 주장하며 인과가 아니다).
+
+**주 결론 (최종 평가 커밋 49c02f8, test 1회)**: 지난 4주의 거리·횟수·공백 정보를 넣은 Ridge·GBM·MLP는 cold-start test(71명)와 personalized(250명) 모두에서 '직전 기록이 평소보다 느리면 평소 쪽으로 돌아온다'는 평균 회귀 규칙(B2)보다 사용자 평균 MAE가 통계적으로 낮지 않았고(6개 비교 모두 CI 상한이 0 이상, 모델 − B2 점추정 +1.9~+23.2초), 이는 동등성의 증명이 아니라 이 자료에서 B2를 이긴다는 증거를 찾지 못했다는 뜻이다.
+
+![사용자 평균 MAE와 95% CI](docs/figures/fig1_mae_ci.png)
+
+그림 1: 사용자 평균 MAE(초, 낮을수록 좋음)와 사용자 단위 cluster bootstrap 95% CI. 회색 = 기준치(B0 변화 없음, B1, B2 평균 회귀), 파랑 = 기본 입력 모델. 상세: [`docs/final_results_5km.md`](docs/final_results_5km.md).
+
+![공백 코호트](docs/figures/fig3_gap_cohort.png)
+
+그림 3: **사후 분석**. 연속한 두 5km 사이의 관측된 러닝 기록의 공백 구간별 기록 변화(둘째 − 첫째) 중앙값과 95% CI. 쌍 30개 미만 구간은 흐리게 표시(참고, 표본 부족). 상관만 보며 인과·처방이 아니다. 상세: [`docs/within_person_results_5km.md`](docs/within_person_results_5km.md). 그림 2(정답 분포)·4(민감도 요약)는 [`docs/figures/`](docs/figures/).
+
+## 시연 프로토타입: 정직한 기대치 코치 (`demo/coach_demo.py`)
+
+위 결론에 따라 모델 대신 **평균 회귀 규칙(B2)만** 사용한다. 직전 28일 안 달리기 4회 이상과 유효 5km 기록 1회 이상이 있어야 예측하고, 부족하면 어떤 조건이 부족한지만 말한다. 80% 범위는 학습 자료의 B2 잔차 10%·90% 분위수로 정했다. 출력 문구 속 모든 숫자는 계산값과 일치하는지 자동 검사한다(불일치 시 오류). 표준 라이브러리만 쓴다.
+
+```bash
+python demo/coach_demo.py demo/examples/ex2_slower_last.csv --asof 2025-03-03T00:00:00
+python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, 10개)
+python demo/make_examples.py            # 합성 예시 CSV 재생성(seed 고정)
+python demo/make_b2_params.py           # b2_params.json과 docs/demo_interval_check.md 재생성(로컬 data/ 필요)
+python demo/bench_demo.py               # docs/demo_performance.md 재생성
+```
+
+입력 CSV 열: `start_time, end_time, distance_km, duration_sec, avg_hr, t5_sec`(5km 세션만 t5_sec = 5.000km 도달 시간, 그 외 비움). 예시 3개는 **직접 만든 합성 데이터**이며 실제 데이터와 무관하다(데이터 재배포 금지).
+
+**① 꾸준히 달린 사람** (`demo/examples/ex1_steady.csv`, 기준 시점 2025-03-03)
+
+```text
+다음 7일 안 5km 예상 기록: 24:41 (80% 범위 21:21 ~ 29:18)
+평소 기록(과거 중앙값): 24:56, 직전 기록: 24:59
+직전 기록이 평소보다 3초 느렸기 때문에 평소 쪽으로 돌아오는 경향을 반영했습니다.
+검증 결과 지난 4주의 거리·횟수 정보는 이 예측을 더 좋게 만들지 못해(49c02f8) 평균 회귀 규칙만 사용합니다.
+이 예측은 원인 분석이 아니며, 주마다 기록이 크게 흔들릴 수 있습니다.
+```
+
+**② 직전 기록이 평소보다 느렸던 사람** (`demo/examples/ex2_slower_last.csv`, 기준 시점 2025-03-03)
+
+```text
+다음 7일 안 5km 예상 기록: 25:22 (80% 범위 22:02 ~ 29:58)
+평소 기록(과거 중앙값): 25:07, 직전 기록: 27:30
+직전 기록이 평소보다 143초 느렸기 때문에 평소 쪽으로 돌아오는 경향을 반영했습니다.
+검증 결과 지난 4주의 거리·횟수 정보는 이 예측을 더 좋게 만들지 못해(49c02f8) 평균 회귀 규칙만 사용합니다.
+이 예측은 원인 분석이 아니며, 주마다 기록이 크게 흔들릴 수 있습니다.
+```
+
+**③ 자격 미달(5km 기록 없음)** (`demo/examples/ex3_no_5km.csv`, 기준 시점 2025-03-03)
+
+```text
+예측할 수 없습니다. 부족한 조건:
+- 직전 28일 안에 유효한 5km 기록이 없습니다(1회 이상 필요).
+```
+
+- **80% 범위 사후 점검**(범위는 학습 자료로만 정했고 점검 후 바꾸지 않음, [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): 실제 포함률 cold-start test 73.9%(352개), personalized 77.8%(442개). 두 평가 모두 목표 80%보다 낮으며(범위가 새 자료에서 더 자주 벗어남) 원인은 미확인이다.
+- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 0.0241 ms, tracemalloc 최대 2,331바이트, 파라미터 파일 365바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).
+- 이 데모는 원인 분석이나 훈련 처방이 아니며, 모델 정확도의 이점을 주장하지 않는다(B2가 모델과 구분되지 않아 가장 단순한 규칙을 택했다).
+
+## 실행 방법
+
+```bash
+pip install -r requirements.txt        # numpy, pandas, scipy, torch(CPU), matplotlib (Python 3.14.7에서 검증)
+# endomondoHR.json을 프로젝트 루트에 둔다(저장소에 포함되지 않음). 이후 단계는 data/ 파생 캐시가 필요하다.
+python 01_parse_run_sessions.py        # 러닝 세션 추출
+# 02~04, 06, 16~18 등 중복 제거·병합 단계(각 스크립트 docstring 참고, 아래 '이전 과제' 재현 방법과 같음)
+python run_all.py --all                # 25~34(이전 과제), 35~41(5km 데이터 점검·사전 선언 이후 단계), 43·44(사후 분석·민감도), 45(그래프)
+python run_all.py --only 43,44,45     # 5km 사후 분석·민감도·그래프만
+```
+
+- `42_final_eval_5km.py`(test 1회 최종 평가)는 `run_all`에 넣지 않았다. 최종 평가는 한 번만 실행했고(`data/final_eval_done.flag`가 있으면 중단) 결과는 [`docs/final_results_5km.md`](docs/final_results_5km.md)에 있다.
+- `run_all.py` 단계별 소요 시간·옵션은 아래 이전 과제 절의 표를 따른다. 그래프 45번은 결과 문서와 로컬 예측값을 읽기만 한다.
+- 데이터 캐시 `data/`와 행별 예측값은 커밋하지 않는다.
+
+## 데이터 안내
+
+- **FitRec/Endomondo 데이터셋** (UCSD McAuley Lab), `endomondoHR.json`(raw). 링크: https://cseweb.ucsd.edu/~jmcauley/datasets/fitrec.html
+- 인용: Jianmo Ni, Larry Muhlstein, Julian McAuley, "Modeling heart rate and activity data for personalized fitness recommendation", The Web Conference (WWW), 2019.
+- **학술 용도 한정(academic use only), 재배포 금지.** 이 저장소에는 데이터 파일과 파생 사용자·세션 단위 표를 포함하지 않는다. 그래프·문서에는 집계 값만 있고, 데모 예시는 합성 데이터다. 사용하려면 출처에서 직접 내려받아야 한다.
+- 원본에는 날씨와 러닝 전 사용자가 입력한 계획 거리가 없다. `start_time`의 시각 기준(UTC 여부)은 판정 불가이며 기준 시점 격자의 가정으로만 쓴다.
+
+## 결과 문서와 커밋 순서
+
+저장소: https://github.com/yunseo1018/running-pace-coach. 아래 순서로 결과를 보기 전에 정의를 먼저 고정했다.
+
+| 순서 | 커밋 | 내용 | 문서 · 스크립트 |
+|---|---|---|---|
+| 1 | 3fad402 | 사전 선언 확정(타깃 T5, 기준치 B0/B1/B2, 통과 기준, 분할, 민감도 S1~S5 18항) | [`predeclaration_5km_final.md`](docs/predeclaration_5km_final.md), 초안 [`week4_predeclaration_5km.md`](docs/week4_predeclaration_5km.md) |
+| 2 | 337e6d9 | 5km 데이터셋 구축·개수·train 내부 기준치(test 정답 미계산) | [`dataset_counts_5km.md`](docs/dataset_counts_5km.md), [`baseline_results_train.md`](docs/baseline_results_train.md) · `38`, `39` |
+| 3 | 9fb0d8f | 사전 선언 보충 | [`predeclaration_5km_addendum.md`](docs/predeclaration_5km_addendum.md) |
+| 4 | 84670d6 | train 내부 모델 비교(Ridge/GBM/MLP, 하이퍼파라미터 선택) | [`model_cv_results_5km.md`](docs/model_cv_results_5km.md) · `40` |
+| 5 | f1857fb (태그 `freeze-5km-v1`) | **평가 동결**(방법·결론의 위계를 test 평가 전에 고정) | [`evaluation_freeze_5km.md`](docs/evaluation_freeze_5km.md) |
+| 6 | 70f10fe | 탐색적 E-MLP(train 내부, 주 결론에 쓰지 않음) | `41` |
+| 7 | **49c02f8** | **최종 평가**: cold-start test·personalized 각 1회 | [`final_results_5km.md`](docs/final_results_5km.md) · `42` |
+| 8 | 2e13216 | 결과 열람 기록 | [`results_viewed_log.md`](docs/results_viewed_log.md) |
+| 9 | 49b5f2b | 사후 분석·민감도 실행 사양 고정(분석 전) | [`posthoc_spec_5km.md`](docs/posthoc_spec_5km.md) |
+| 10 | 1174cec | **사후 분석**: 같은 사람 안 관계, 공백 코호트 | [`within_person_results_5km.md`](docs/within_person_results_5km.md) · `43` |
+| 11 | 106c0ce | **사전 지정 민감도** S1~S5(주 결론은 바뀌지 않음) | [`sensitivity_results_5km.md`](docs/sensitivity_results_5km.md) · `44` |
+| 12 | fd228c5 | 결과 그래프 4개 | [`docs/figures/`](docs/figures/) · `45` |
+| 13 | fa15c82 | 시연 프로토타입 | [`demo/`](demo/), [`demo_interval_check.md`](docs/demo_interval_check.md) |
+| 14 | b91bbd7 | 데모 성능 측정 | [`demo_performance.md`](docs/demo_performance.md) · `demo/bench_demo.py` |
+
+그 밖의 5km 과제 문서: [`week4_data_audit.md`](docs/week4_data_audit.md)(데이터 점검), [`week5_target_check.md`](docs/week5_target_check.md)(타깃 단위·포함/제외 단계). 이전 과제(다음 러닝 페이스 예측) 문서는 아래 부록과 [`docs/`](docs/)에 있다.
+
+## 외부 코드·라이브러리 출처
+
+- 이 저장소의 Ridge(`ridge_lib.py`), GBM(`gbt_lib.py`), haversine 거리, 5km 보간, 평가·bootstrap 코드는 직접 작성했다. 다른 저장소에서 복사·수정한 코드는 없다(저장소 안 검색으로 출처 표기가 없음을 확인).
+- 라이브러리: numpy, pandas, scipy(LAD는 `scipy.optimize.linprog`의 HiGHS), torch(MLP), matplotlib(그래프). 버전은 [`requirements.txt`](requirements.txt)와 [`docs/environment.md`](docs/environment.md). scikit-learn은 사용하지 않는다.
+- 데이터와 인용은 위 '데이터 안내'를 따른다.
+
+## 주요 한계 (5km 과제)
+
+- 비유의는 동등성의 증명이 아니다. 평가 대상은 cold-start test 352개, personalized 442개로 CI가 넓다.
+- 같은 사람 안 분석·공백 코호트는 사후 분석이며 상관만 보인다. 표본이 작은 공백 구간은 참고용이다.
+- `start_time`의 시각 기준은 미확인이고, T5는 경과 시간 기준이다. 휴식·신호 대기가 포함된다.
+- 80% 범위의 실제 포함률은 사후 점검 값이며 데모는 연구 결과의 시연일 뿐 코칭 효과 검증이 아니다. 실제 사용자 반응은 관찰하지 않았다.
+
+---
+
+<!-- OLD_README_BELOW -->
+
+# 부록: 이전 과제 — 다음 러닝 페이스 예측과 목표 기반 코칭 (3주차까지)
+
+# 부록: 이전 과제 — 다음 러닝 페이스 예측과 목표 기반 코칭 (3주차까지)
+
+## 러닝 페이스 예측 및 목표 기반 코칭 (연구 프로젝트)
 
 서강대학교 가상융합전문대학원 「AX 이론과 활용」 수업 프로젝트입니다. 러닝 기록 시계열로 **다음 러닝 세션의 평균 페이스를 예측**하고, 예측 오차가 **목표 기반 코칭 판정**을 얼마나 흔드는지 평가합니다.
 
 > 이 README의 모든 수치는 `docs/` 문서에서 확인된 값만 옮긴 것입니다. 확인하지 못한 것은 "미확인/추정"으로 표기했습니다.
 
-## 프로젝트 목적
+### 프로젝트 목적
 
 1. **페이스 예측**: 한 사용자의 과거 러닝 기록만으로 다음(6번째) 러닝의 평균 페이스를 예측하고, 단순 규칙(baseline) 대비 개선이 있는지 통계적으로 검증
 2. **코칭 판정**: 목표 대비 진행 상황을 계산해 고정 템플릿 문구로 코칭 (LLM/RAG 없음). 예측기와 코칭 모듈은 분리해 평가
 
-## 데이터 출처와 라이선스
+### 데이터 출처와 라이선스
 
 - **FitRec/Endomondo 데이터셋** (UCSD McAuley Lab), 파일 `endomondoHR.json` (raw 버전)
   - 링크: https://cseweb.ucsd.edu/~jmcauley/datasets/fitrec.html
@@ -18,7 +145,7 @@
 - 원본에 **날씨, 사용자가 러닝 전에 입력한 계획 거리는 없습니다**(`docs/feature_availability.md`에서 필드 목록으로 확인). 따라서 모든 모델이 이 정보 없이 학습되었습니다.
 - 러닝(run) 종류만 사용합니다. 파일이 2GB 이상이라 스트리밍으로 파싱합니다.
 
-## 메인 태스크 정의
+### 메인 태스크 정의
 
 - **입력**: 한 사용자의 과거 5개 러닝 세션 각각의 (실제 완주 거리, 평균 페이스, 평균 심박) 시퀀스(N=5 고정). 7단계부터는 과거 이력 요약 피처 7개를 추가(총 22개). **예측 대상 세션의 거리·시간·심박·페이스는 어떤 형태로도 입력하지 않습니다.**
 - **타깃**: 6번째 러닝 세션 전체의 평균 페이스(경과 시간 기준, 초/km). 이동 시간 기준 페이스는 민감도 확인용(`docs/target_pace_definition.md`).
@@ -28,7 +155,7 @@
   - **personalized**: 사용자 내 시간순 분할 (허용 학습 자료 = 각 사용자의 history 구간)
 - 세션이 6개 미만인 사용자는 제외합니다.
 
-## 파이프라인 단계 요약 (1~11)
+### 파이프라인 단계 요약 (1~11)
 
 | 단계 | 내용 | 주요 문서 |
 |---|---|---|
@@ -45,7 +172,7 @@
 | 11 | 코칭 평가 분리: 예측 오차가 판정을 얼마나 흔드는가 | `docs/coaching_results.md` |
 | 12 | README/CLAUDE.md 정리 | 이 문서 |
 
-## 최종 결과 (동일 평가 윈도우, `docs/model_comparison.md`)
+### 최종 결과 (동일 평가 윈도우, `docs/model_comparison.md`)
 
 타깃 = 6번째 세션 평균 페이스(초/km, 낮을수록 좋음). 95% CI는 **사용자 단위 bootstrap**(2000회). 모든 하이퍼파라미터는 학습 구간 내부 검증/CV로만 선택했고 테스트는 쓰지 않았습니다. 평가 세션 수: cold-start 21,977건(사용자 149명), personalized 20,628건(742명). 병합 영향 샘플 수: 4,187 / 3,254.
 
@@ -79,23 +206,23 @@
 **추정/미확인**
 - (d)가 GBM/MLP만큼 좋은 이유(장기 페이스 수준 정보가 개선의 상당 부분을 설명한다는 가설)와 personalized에서 GBM/MLP가 약간 더 낮은 이유는 직접 검증하지 않았습니다.
 
-### 10월 3주차 동일 입력 범위 비교 ([`docs/same_scope_comparison.md`](docs/same_scope_comparison.md))
+#### 10월 3주차 동일 입력 범위 비교 ([`docs/same_scope_comparison.md`](docs/same_scope_comparison.md))
 - 입력 범위가 다른 방법을 한 순위에 섞지 않도록 두 그룹으로 나눠 그룹 안에서만 비교했습니다: (a) 최근 5회만(median-5, Ridge15, GBM15, MLP15), (b) 타깃 이전 전체 이력(전체 이력 중앙값, (d), Ridge22, GBM22, MLP22). 사전 선언은 `docs/week3_predeclaration.md`, 방법별 이력 범위 표는 `docs/history_scope_table.md`입니다.
 - 그룹 (a): median-5 대비 GBM15/MLP15의 풀링 MAE 개선폭은 cold-start +1.32/+1.18, personalized +0.80/+0.86초/km입니다(22피처 모델의 개선폭 2.6~3.0초/km와 기준은 같지만 입력 범위가 달라 순위를 매기지 않음). 이 개선폭은 macro MAE(사용자별 MAE 평균)에서는 두 모델 모두 CI가 0을 포함합니다.
 - 풀링 MAE와 macro MAE의 결론이 갈립니다: cold-start에서 GBM22의 macro MAE는 median-5보다 점추정이 오히려 높고(CI 0 포함), MLP22만 macro에서도 유의하게 낮습니다. 원인은 검증하지 않았습니다(추정/미확인).
 - 그룹 (b): cold-start 풀링 MAE에서 (d)·MLP22·GBM22는 서로 구분되지 않고, personalized에서는 MLP22만 (d)보다 유의하게 낮습니다(+0.778 [+0.347, +1.403]). (d)는 9단계 결과를 본 뒤 추가한 탐색적 baseline입니다.
 - 모든 CI는 사용자 단위 cluster bootstrap(2000회, seed 42)이며, CI가 0을 포함하는 비교는 동등성의 입증이 아닙니다.
 
-### 10월 3주차 4~6번 요약
+#### 10월 3주차 4~6번 요약
 - **4번 코칭 판정 보류 (합성 시나리오)** — [`docs/coaching_definition.md`](docs/coaching_definition.md), [`docs/coaching_abstain_results.md`](docs/coaching_abstain_results.md): 80%/90% 구간(예측 ± 절대 잔차 분위수)의 하·상한이 같은 범주일 때만 판정하면 **보류율이 96.4~99.3%**(구간 폭 103~195초/km가 범주 폭 20~23초/km보다 훨씬 넓음)이고 보류가 코칭 품질 향상을 뜻하지 않습니다. 결과를 본 뒤 추가한 통제에서 판정된 윈도우(대부분 "앞서감")의 불일치율은 같은 윈도우의 상수 규칙과 대체로 구분되지 않았습니다.
 - **5번 극단 세션 ↔ 윈도우** — [`docs/extreme_session_window_map.md`](docs/extreme_session_window_map.md): 극단 세션 826건(0.781%)은 평가 윈도우의 약 3~4%에 관여하고 제곱오차 상위 1% 윈도우가 SSE의 92~94%를 차지하며, 그 중 타깃이 극단인 윈도우가 59~84%입니다(**집계 단위가 달라 세션 비율과 윈도우 기여를 직접 비교할 수 없음**). 극단 세션의 분류는 병합 1.3%·정지 비율≥0.5 27.8%·1km 미만 29.2%·미분류 47.5%(중복 집계, GPS 오류·중복 흔적은 세션 표로 판정 불가). 인과 해석은 하지 않습니다.
 - **6번 재현성** — [`docs/environment.md`](docs/environment.md), [`docs/sklearn_import_issue.md`](docs/sklearn_import_issue.md): `run_all.py`, 해시 키 캐시, 진단 줄의 `logs/` 분리, 환경·데이터·분할·하이퍼파라미터 해시 기록, `requirements.txt`, 가명화 예측값 내보내기(git 제외).
 
-### 코칭 평가 (합성 시나리오 — 실제 사용자 목표 기반 성능이 아님)
+#### 코칭 평가 (합성 시나리오 — 실제 사용자 목표 기반 성능이 아님)
 
 데이터에 사용자가 입력한 실제 목표가 없어 목표 비율(3/5/10%), 데드라인(8주, 민감도 4주), 카테고리 임계값(±3%, +10%)은 모두 결과를 보기 전에 고정한 합성 설정입니다. 판정 불일치율(실제 페이스로 판정한 카테고리와 다른 비율)은 median-5 제외 62~67% 수준이고, 주당 체크포인트 이동(약 2초/km)이 예측 오차(MAE 약 55~60초/km)보다 훨씬 작아 판정은 예측 오차와 러닝 간 변동에 좌우됩니다. 학습/이력 구간에서 정한 상수 규칙 대비 GBM/MLP는 cold-start에서 구분되지 않고 personalized에서 약 3.6~4.1%p 낮았습니다(`docs/coaching_results.md`). median-5 대비 감소폭은 현재 실력을 median-5로 정의한 시나리오의 구조 효과라 결과로 인용하지 않습니다.
 
-## 10월 3주차 산출물
+### 10월 3주차 산출물
 
 교수 피드백(10/12)에 따라 새 모델을 늘리지 않고 비교 조건과 코칭 평가의 의미를 고정한 주의 문서들입니다. 코칭 관련 결과는 모두 합성 시나리오 기준입니다.
 
@@ -120,7 +247,7 @@
 - 다중 세션 집계는 설계와 표본 수 점검까지만 했고, 어떤 모델도 학습·평가하지 않았습니다. 타임존 정보가 없어 UTC 격자로 가정했고, 평가는 타깃 주에 러닝이 있었던 앵커로 조건부입니다.
 - 극단 세션 분류에서 GPS 오류·중복 흔적은 세션 표만으로 판정할 수 없어 "미판정"으로 남겼습니다.
 
-## 주요 한계
+### 주요 한계
 
 - **개선폭의 크기**: 통계적으로 유의해도 절대 개선폭은 2.5~3초/km(4~5%)로, 코칭 문구를 바꿀 만큼 실용적인지는 별개입니다.
 - **극단 페이스 집중**: RMSE 비교는 상위 1% 오차 윈도우(주로 극단 페이스)에 좌우됩니다. 원인(GPS 이상치 vs 실제 휴식 포함 등)은 검증하지 않았습니다(추정/미확인).
@@ -130,7 +257,7 @@
 - **코칭은 합성 시나리오**: 실제 사용자의 목표 설정·반응은 관찰하지 않았고, 코칭 문구 품질은 평가하지 않았습니다.
 - 입력 정보량이 성능의 병목일 수 있다는 것은 가설이며 직접 검증하지 않았습니다.
 
-## 재현 방법
+### 재현 방법
 
 환경(검증한 버전, 자세한 기록과 데이터·분할·하이퍼파라미터 해시는 [`docs/environment.md`](docs/environment.md)): Python 3.14.7, numpy 2.5.3, pandas 3.0.6, scipy 1.18.1, torch 2.14.0 (CPU). **scikit-learn은 필요하지 않다**(진단 로그 전용; 설치돼 있어도 결과에 영향 없음).
 
@@ -162,11 +289,11 @@ python run_all.py                    # 결과 문서 재생성: 27 → 28 → 29
 - 데이터 캐시(`data/`)는 원본에서 다시 만들 수 있는 파생 데이터라 커밋하지 않습니다.
 - **감사 대응표/샘플 CSV(`docs/merge_audit/`)는 저장소에 포함하지 않으며(원본 파생 사용자·세션 ID 목록), `13_merge_audit.py`, `14_overlap_exclusion_audit.py`, `16_duplicate_dedup.py` 실행으로 재생성할 수 있습니다.** 극단 세션 ↔ 윈도우 세션 단위 대응표(`33_extreme_session_map.py`)도 `data/`에만 저장합니다.
 
-## 저장소 구성
+### 저장소 구성
 
 - `config.py` 경로·상수·메인 데이터 검증 / `gbt_lib.py` numpy GBM / `ridge_lib.py` numpy Ridge / `coaching_lib.py` 코칭 모듈 / `run_all.py` 결과 재생성 실행기 / `env_tools.py` 환경 기록·진단 도구
 - `NN_*.py` 단계별 스크립트 / `docs/` 단계별 결과·감사 문서 / `CLAUDE.md` 작업 규칙
 
-## 라이선스
+### 라이선스
 
 이 저장소의 코드는 자유롭게 참고 가능합니다. 단, FitRec 데이터셋은 별도 라이선스(academic use only)를 따르므로 원본 출처에서 직접 다운로드해 사용해야 하며, 데이터와 그 파생 데이터의 재배포는 금지됩니다.
