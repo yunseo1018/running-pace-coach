@@ -88,9 +88,8 @@ def assess(sessions, asof, params):
     if len(past) == 1:
         m = ref
     y_hat = predict_change(ref, m, params)
-    res.update(ref=ref, m=m, y_hat=y_hat, pred=ref + y_hat, a_term=params["a"], b_term=params["b"] * (ref - m),
-               a_int=int(round(params["a"])), tot_int=int(round(y_hat)), b_int=int(round(y_hat)) - int(round(params["a"])),
-               cov=params["test_coverage_cold"],
+    res.update(ref=ref, m=m, y_hat=y_hat, pred=ref + y_hat, a_term=params["a"], b_coef=params["b"], b_term=params["b"] * (ref - m),
+               tot_int=int(round(y_hat)), cov=params["test_coverage_cold"],
                lo=ref + y_hat + params["resid_q10"], hi=ref + y_hat + params["resid_q90"])
     return res
 
@@ -113,6 +112,12 @@ def signed(sec):
     return ("+%d" % t) if t > 0 else ("−%d" % abs(t) if t < 0 else "0")
 
 
+def signed1(sec):
+    """부호 있는 소수 1자리 초 표기(반올림만, 실제 값 그대로). 예: -15.3."""
+    t = round(sec, 1)
+    return ("+%.1f" % t) if t > 0 else ("−%.1f" % abs(t) if t < 0 else "0.0")
+
+
 def cov_text(res):
     return "%.1f%%" % (100.0 * res["cov"])
 
@@ -128,31 +133,32 @@ def format_report(res):
         trend = "직전 기록이 평소보다 %d초 빨랐기 때문에 평소 쪽으로 돌아오는 경향을 반영했습니다." % n
     else:
         trend = "직전 기록이 평소와 같아 평소 쪽으로 돌아오는 보정이 거의 없습니다."
-    a = res["a_int"]
-    avg_dir = "빨랐음" if a < 0 else "느렸음"
-    return ("다음 7일 안 5km 예상 기록: %s (80%% 범위(학습 잔차 기준, 테스트 실제 포함률 %s) %s ~ %s)\n"
-            % (mmss(res["pred"]), cov_text(res), mmss(res["lo"]), mmss(res["hi"]))
+    return ("다음 7일 안 5km 예상 기록: %s / 80%% 범위 %s ~ %s\n" % (mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"]))
+            + "(범위는 학습 잔차 기준, 테스트에서 실제 포함률 %s)\n" % cov_text(res)
             + "평소 기록(과거 중앙값): %s, 직전 기록: %s\n" % (mmss(res["m"]), mmss(res["ref"]))
-            + "예상 변화 %s초 = 평균 변화량 a(약 %s초) + 평소 대비 이번 기록 보정 b×(기준 기록 − 평소)(%s초)\n"
-            % (signed(res["tot_int"]), signed(a), signed(res["b_int"]))
-            + "학습 데이터에서 다음 7일 첫 5km는 평균적으로 약 %d초 %s(상관, 인과 아님).\n" % (abs(a), avg_dir)
+            + "예상 변화 약 %s초 = 기본 변화량 a(%s초) + 평소 대비 보정 b×(직전 − 평소)(%s초)\n"
+            % (signed(res["tot_int"]), signed1(res["a_term"]), signed1(res["b_term"]))
+            + "직전 기록이 평소와 같았던 경우, 학습 데이터에서 다음 7일 첫 5km 변화의 중앙값은 약 %s초였음(상관, 인과 아님).\n"
+            % signed(res["a_term"])
             + trend + "\n"
-            + "검증 결과 지난 4주의 거리·횟수 정보는 이 예측을 더 좋게 만들지 못해(49c02f8) 평균 회귀 규칙만 사용합니다.\n"
+            + "검증 결과 지난 4주의 거리·횟수 정보는 이 예측을 더 좋게 만들지 못해 평균 회귀 규칙만 사용합니다. 근거: 최종 평가 결과(docs/final_results_5km.md)\n"
             + "이 예측은 원인 분석이 아니며, 주마다 기록이 크게 흔들릴 수 있습니다.")
 
 
-# 각 항은 정수 초로 반올림하되 보정 항 = 예상 변화 − a 항으로 맞춰 합이 어긋나 보이지 않게 한다(최대 1초 차이).
-# 템플릿에 고정된 숫자(다음 7일, 5km, 80%, 지난 4주, 28일, 4회)와 커밋 해시. 계산값이 아니므로 따로 허용한다.
+# 템플릿에 고정된 숫자(다음 7일, 5km, 80%, 지난 4주, 28일, 4회)와 파일 이름 속 5. 계산값이 아니므로 따로 허용한다.
 TEMPLATE_INTS = {"4", "5", "7", "28", "80"}
-HASH = "49c02f8"
-_TOKEN = re.compile(r"49c02f8|\d+:\d{2}|\d+\.\d+|\d+")
+_TOKEN = re.compile(r"\d+:\d{2}|\d+\.\d+|\d+")
+
+
+def _abs_text(txt):
+    return txt.lstrip("+-−")
 
 
 def check_numbers(text, res):
     """출력 문구 속 모든 숫자가 계산값(또는 템플릿 고정 숫자)과 일치하는지 검사한다. 불일치 시 ValueError."""
     tokens = _TOKEN.findall(text)
     if not res["eligible"]:
-        allowed = {str(res["n_runs"]), "1"} | TEMPLATE_INTS | {HASH}   # 1 = "5km 기록 1회 이상 필요"
+        allowed = {str(res["n_runs"]), "1"} | TEMPLATE_INTS   # 1 = "5km 기록 1회 이상 필요"
         for t in tokens:
             if t not in allowed:
                 raise ValueError("계산값과 맞지 않는 숫자: " + t)
@@ -162,24 +168,28 @@ def check_numbers(text, res):
     found = [t for t in tokens if ":" in t]
     if found != needed:
         raise ValueError("시간 표기가 계산값과 다름: %s != %s" % (found, needed))
-    a_i = abs(res["a_int"])
-    if res["a_int"] + res["b_int"] != res["tot_int"]:
-        raise ValueError("a 항 + 보정 항 != 예상 변화(반올림 후)")
-    strip = "+-−"
-    must = {"차이": str(abs(ref_s - m_s)), "예상 변화": signed(res["tot_int"]).lstrip(strip), "a": signed(res["a_int"]).lstrip(strip),
-            "b 보정": signed(res["b_int"]).lstrip(strip), "포함률": cov_text(res).rstrip("%")}
-    ints = set(must.values()) | TEMPLATE_INTS | {str(a_i)}
+    if int(round(res["a_term"] + res["b_term"])) != res["tot_int"]:
+        raise ValueError("a 항 + 보정 항의 반올림 != 예상 변화")
+    # 보정 항과 문구의 N(반올림한 직전-평소 차이)의 일치: 부호가 반대이고, 크기 차이가 반올림 오차(1초 x |b|) 이내
+    gap = ref_s - m_s
+    if abs(res["b_term"] - res["b_coef"] * gap) > abs(res["b_coef"]) * 1.0 + 1e-9:
+        raise ValueError("보정 항이 문구의 N과 맞지 않음")
+    if gap != 0 and res["b_term"] * gap * res["b_coef"] < 0:
+        raise ValueError("보정 항의 방향이 N과 맞지 않음")
+    dec = {_abs_text(signed1(res["a_term"])), _abs_text(signed1(res["b_term"])), cov_text(res).rstrip("%")}
+    ints = {str(abs(gap)), _abs_text(signed(res["tot_int"])), _abs_text(signed(res["a_term"]))} | TEMPLATE_INTS
     for t in tokens:
-        if t != HASH and ":" not in t and t not in ints:
+        if ":" in t:
+            continue
+        if ("." in t and t not in dec) or ("." not in t and t not in ints):
             raise ValueError("계산값과 맞지 않는 숫자: " + t)
-    # 필수 항목이 문구에 실제로 있는지(차이는 같을 때 제외)
-    expect_lines = {"포함률": "실제 포함률 %s)" % cov_text(res), "예상 변화": "예상 변화 %s초" % signed(res["tot_int"]),
-                    "a": "a(약 %s초)" % signed(res["a_int"]), "b 보정": "기준 기록 − 평소)(%s초)" % signed(res["b_int"]),
-                    "평균": "평균적으로 약 %d초" % a_i}
-    for k, frag in expect_lines.items():
+    expect = {"포함률": "실제 포함률 %s)" % cov_text(res), "예상 변화": "예상 변화 약 %s초" % signed(res["tot_int"]),
+              "a 항": "기본 변화량 a(%s초)" % signed1(res["a_term"]), "보정 항": "b×(직전 − 평소)(%s초)" % signed1(res["b_term"]),
+              "a 설명": "중앙값은 약 %s초였음" % signed(res["a_term"])}
+    for k, frag in expect.items():
         if frag not in text:
             raise ValueError("문구에 계산값이 없음: " + k)
-    if ref_s != m_s and (" %d초 " % abs(ref_s - m_s)) not in text:
+    if gap != 0 and (" %d초 " % abs(gap)) not in text:
         raise ValueError("직전-평소 차이(초)가 문구에 없음")
     return True
 

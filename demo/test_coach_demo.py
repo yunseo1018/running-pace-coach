@@ -91,18 +91,29 @@ def test_number_check_passes_and_catches_mismatch():
 def test_two_term_split_and_coverage_text():
     sess = [S(1), S(5), S(9), S(20, 5.2, 1400), S(2, 5.1, 1500)]
     r = cd.assess(sess, ASOF, P)
-    assert r["a_int"] == -15 and r["b_int"] == -40 and r["tot_int"] == -55      # -15 + (-0.8 x 50)
+    assert r["a_term"] == -15.0 and abs(r["b_term"] - (-40.0)) < 1e-9 and r["tot_int"] == -55      # -15 + (-0.8 x 50)
     text = cd.format_report(r)
-    assert "평균 변화량 a(약 −15초)" in text and "(−40초)" in text and "예상 변화 −55초" in text
-    assert "테스트 실제 포함률 73.9%" in text and "80% 범위(학습 잔차 기준" in text
-    assert "평균적으로 약 15초 빨랐음(상관, 인과 아님)" in text
-    # 항을 바꾸면 검사에서 걸린다
-    for old, new in [("(−40초)", "(−41초)"), ("73.9%", "74.0%"), ("약 15초 빨랐음", "약 16초 빨랐음")]:
+    assert "기본 변화량 a(−15.0초)" in text and "b×(직전 − 평소)(−40.0초)" in text and "예상 변화 약 −55초" in text
+    assert "(범위는 학습 잔차 기준, 테스트에서 실제 포함률 73.9%)" in text and "80% 범위 " in text
+    assert "중앙값은 약 −15초였음(상관, 인과 아님)" in text
+    assert "평균 변화량" not in text and "49c02f8" not in text and "최종 평가 결과(docs/final_results_5km.md)" in text
+    # N과 보정 항 일치: 50초 느림 <-> 보정 -40.0 (= -0.8 x 50)
+    assert "평소보다 50초 느렸" in text
+    # 항·포함률·N을 바꾸면 검사에서 걸린다
+    for old, new in [("(−40.0초)", "(−41.0초)"), ("73.9%", "74.0%"), ("약 −15초였음", "약 −16초였음"), ("(−15.0초)", "(−15.1초)")]:
         try:
             cd.check_numbers(text.replace(old, new), r)
         except ValueError:
             continue
         raise AssertionError("검사를 통과함: " + old)
+    # 보정 항이 N과 어긋난 결과 객체는 검사에서 걸린다
+    bad = dict(r, b_term=-10.0, tot_int=-25)
+    try:
+        cd.check_numbers(cd.format_report(bad), bad)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("보정 항-N 불일치를 잡지 못함")
 
 
 def test_ineligible_text_lists_only_shortfalls():
