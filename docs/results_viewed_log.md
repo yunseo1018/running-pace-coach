@@ -57,3 +57,4 @@
 ## 8. 사후 탐색 사양 고정 (상대 심박)
 
 - 결과 미열람 상태에서 사양 고정: 기준 기록 세션의 상대 심박 r과 y의 관계·계수·r의 분포는 계산하지 않았고 `docs/posthoc_spec_hr_5km.md`로 분석 전에 고정했다(열람한 것은 5km 세션 heart_rate 점 값의 품질 집계뿐).
+- 사양 고정 커밋 이후 실행·열람: `docs/posthoc_spec_hr_5km.md`(커밋 9d2efda) 고정 뒤 `scripts/47_hr_posthoc_5km.py`를 실행하고 `docs/hr_posthoc_results_5km.md`(r의 분포, 주·보조 모형 계수와 CI)를 열람했다. 사후 탐색이며 주 결론(49c02f8)·시연 예측식·사양을 이 결과로 바꾸지 않는다.
