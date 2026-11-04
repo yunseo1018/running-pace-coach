@@ -53,3 +53,7 @@
 ## 7. 사후 분석·민감도 열람 (49c02f8 이후, 사양 49b5f2b)
 
 - 같은 사람 안 분석·공백 코호트(`docs/within_person_results_5km.md`, 사후 분석)와 사전 지정 민감도 S1~S5(`docs/sensitivity_results_5km.md`)를 실행·열람했다. 두 평가 자료(test·personalized)의 정답을 본 뒤의 분석이므로 이 결과로 주 결론(49c02f8)·모델·설정을 바꾸지 않는다.
+
+## 8. 사후 탐색 사양 고정 (상대 심박)
+
+- 결과 미열람 상태에서 사양 고정: 기준 기록 세션의 상대 심박 r과 y의 관계·계수·r의 분포는 계산하지 않았고 `docs/posthoc_spec_hr_5km.md`로 분석 전에 고정했다(열람한 것은 5km 세션 heart_rate 점 값의 품질 집계뿐).
