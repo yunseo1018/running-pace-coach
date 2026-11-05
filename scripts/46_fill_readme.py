@@ -43,10 +43,11 @@ for name, a, b in [("cold", "## A.", "## B."), ("pers", "## B.", None)]:
     for line in sec.splitlines():
         m = re.match(r"\| (Ridge|GBM|MLP) \| ([+-][\d.]+) \[([-\d.]+), ([-\d.]+)\] \|", line)
         if m:
-            diffs[(name, m.group(1))] = (float(m.group(2)), float(m.group(4)))
+            diffs[(name, m.group(1))] = (float(m.group(2)), float(m.group(4)), float(m.group(3)))
 assert len(diffs) == 6
 lo_d, hi_d = min(v[0] for v in diffs.values()), max(v[0] for v in diffs.values())
-assert all(v[1] >= 0 for v in diffs.values())      # CI 상한이 모두 0 이상 = 통계적 통과 0/6
+assert all(v[1] >= 0 for v in diffs.values())
+assert sorted(k for k, v in diffs.items() if v[2] > 0) == [("pers", "MLP")]      # CI 하한이 0보다 큰 비교는 personalized MLP뿐(문구의 근거)      # CI 상한이 모두 0 이상 = 통계적 통과 0/6
 n_cold = re.search(r"평가 기준 시점 (\d+)개, 사용자 (\d+)명", fin)
 n_pers = re.search(r"평가 기준 시점 (\d+)개, 사용자 (\d+)명", fin[fin.index("## B."):])
 
@@ -79,8 +80,8 @@ A("")
 A("**연구 질문**: 지난 4주 동안 몇 번, 얼마나 멀리, 얼마나 쉬면서 달렸는지로 다음 7일 안 5km 기록의 변화를 예측할 수 있는가(상관관계까지만 주장하며 인과가 아니다).")
 A("")
 A(f"**주 결론 (최종 평가 커밋 49c02f8, test 1회)**: 지난 4주의 거리·횟수·공백 정보를 넣은 Ridge·GBM·MLP는 cold-start test({n_cold.group(2)}명)와 personalized({n_pers.group(2)}명) 모두에서 "
-  f"'직전 기록이 평소보다 느리면 평소 쪽으로 돌아온다'는 평균 회귀 규칙(B2)보다 사용자 평균 MAE가 통계적으로 낮지 않았고(6개 비교 모두 CI 상한이 0 이상, 모델 − B2 점추정 {lo_d:+.1f}~{hi_d:+.1f}초), "
-  "이는 동등성의 증명이 아니라 이 자료에서 B2를 이긴다는 증거를 찾지 못했다는 뜻이다.")
+  f"'직전 기록이 평소보다 느리면 평소 쪽으로 돌아온다'는 평균 회귀 규칙(B2)와 비교했을 때 점추정은 6개 비교 모두 B2보다 컸으나(모델 − B2 {lo_d:+.1f}~{hi_d:+.1f}초) CI 상한이 모두 0 이상이라 우열을 확정할 수 없다(동등성의 증명은 아니다). "
+  "현재 자료로 B2보다 낫다는 뚜렷한 증거를 확인하지 못했고, CI 하한이 0보다 큰 것은 personalized MLP뿐이라 이 경우에만 'B2보다 나쁨'이라고 쓸 수 있다.")
 A("")
 A("![사용자 평균 MAE와 95% CI](docs/figures/fig1_mae_ci.png)")
 A("")
@@ -113,7 +114,7 @@ for f, title, out in demo_blocks:
     A("")
 A(f"- **80% 범위 사후 점검**(범위는 학습 자료로만 정했고 점검 후 바꾸지 않음, [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): 실제 포함률 cold-start test {cov[0][3]}%({cov[0][1]}개), personalized {cov[1][3]}%({cov[1][1]}개). 두 평가 모두 목표 80%보다 낮으며(범위가 새 자료에서 더 자주 벗어남) 원인은 미확인이다.")
 A(f"- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 {b2c[0]} ms, tracemalloc 최대 {b2c[3]}바이트, 파라미터 파일 {b2c[4]}바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).")
-A("- 이 데모는 원인 분석이나 훈련 처방이 아니며, 모델 정확도의 이점을 주장하지 않는다(B2가 모델과 구분되지 않아 가장 단순한 규칙을 택했다).")
+A("- 이 데모는 원인 분석이나 훈련 처방이 아니며, 모델 정확도의 이점을 주장하지 않는다(현재 자료로 모델과 B2의 우열을 확정할 수 없어 가장 단순한 규칙을 택했다).")
 A("")
 A("## 실행 방법")
 A("")
