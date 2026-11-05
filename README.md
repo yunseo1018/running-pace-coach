@@ -20,7 +20,7 @@
 
 ```bash
 python demo/coach_demo.py demo/examples/ex2_slower_last.csv --asof 2025-03-03T00:00:00
-python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, 10개)
+python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, 11개)
 python demo/make_examples.py            # 합성 예시 CSV 재생성(seed 고정)
 python demo/make_b2_params.py           # b2_params.json과 docs/demo_interval_check.md 재생성(로컬 data/ 필요)
 python demo/bench_demo.py               # docs/demo_performance.md 재생성

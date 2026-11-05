@@ -57,8 +57,8 @@ NAMES = {
 SHORT = {"median5": "median-5", "ridge15": "Ridge15", "gbm15": "GBM15", "mlp15": "MLP15", "hist_median": "전체이력중앙값",
          "blend": "(d)", "ridge22": "Ridge22", "gbm22": "GBM22", "mlp22": "MLP22"}
 DOC_ROW = {  # docs/model_comparison.md 종합표의 행 이름 (불변 검증용)
-    "median5": "3. median-5", "hist_median": "P1. 사용자 전체 이력 중앙값(사후추가)",
-    "blend": "P4. 0.5*median5+0.5*전체이력중앙값(사후추가)", "ridge22": "6b. Ridge(22피처,확장)",
+    "median5": "3. median-5", "hist_median": "P1. 사용자 전체 이력 중앙값(탐색적)",
+    "blend": "P4. 0.5*median5+0.5*전체이력중앙값(탐색적)", "ridge22": "6b. Ridge(22피처,확장)",
     "gbm22": "7. 직접구현 GBM(주결과)", "mlp22": "8. MLP(주결과)", "ridge15_legacy": "6a. Ridge(15피처,원복원)",
 }
 

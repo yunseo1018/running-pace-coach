@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 rd = ROOT / "README.md"
+n_tests = len(re.findall(r"^def test_", (ROOT / "demo" / "test_coach_demo.py").read_text(encoding="utf-8"), re.M))   # README 테스트 개수는 test_ 함수 수에서 읽는다
 old = rd.read_text(encoding="utf-8")
 MARK = "<!-- OLD_README_BELOW -->"
 if MARK in old:
@@ -95,7 +96,7 @@ A("위 결론에 따라 모델 대신 **평균 회귀 규칙(B2)만** 사용한�
 A("")
 A("```bash")
 A("python demo/coach_demo.py demo/examples/ex2_slower_last.csv --asof 2025-03-03T00:00:00")
-A("python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, 10개)")
+A(f"python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, {n_tests}개)")
 A("python demo/make_examples.py            # 합성 예시 CSV 재생성(seed 고정)")
 A("python demo/make_b2_params.py           # b2_params.json과 docs/demo_interval_check.md 재생성(로컬 data/ 필요)")
 A("python demo/bench_demo.py               # docs/demo_performance.md 재생성")
