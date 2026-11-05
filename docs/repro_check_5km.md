@@ -162,3 +162,89 @@ README의 절차를 그대로 따를 수 없어 아래 순서로 실행했다(4�
 - 원본 `endomondoHR.json`(sha256 일치)에서 출발해 사본에서 새로 만든 세션 표 6종·기준 시점·5km 데이터셋·예측값은 원본과 같고, 최종 평가(42번) 이후 문서의 수치는 글자 그대로 같았다. 수치가 달라진 문서는 없다(다른 문서는 `environment.md`의 예측값 파일 절뿐).
 - 단 **고정 입력 3개를 원본에서 복사했고**(분할 ID 2개, with_moving 1개) 이를 코드로 재생성할 수 없다는 점, 그리고 `run_all` 기본 명령이 31번에서 실패하는 점은 재현성의 결함이다. 31번이 쓰는 `docs/same_scope_comparison.md`의 재현은 확인하지 못했다.
 - 확인하지 않은 것: `run_all.py --all` 한 번 실행, `--repeat`, 다른 PC·다른 Python/패키지 버전, 사본 이후 커밋(`9d2efda`·`9b0d6ab`의 심박 사후 탐색)의 재현, 31번 실패 원인 외의 시간 차이 원인.
+
+## 8. 고정 입력 = 원본 json 1개 (최종 재현 확인, 새 폴더)
+
+앞 절들은 분할 ID 두 파일과 `run_sessions_deduped_merged_with_moving.pkl`을 원본 `data/`에서 복사해 넣고 실행한 결과였다. 그 뒤 03(분할 ID)과 18c(`_with_moving`)를 코드로 고쳤으므로(`docs/split_provenance.md`, `docs/pipeline_order.md`) **원본 `endomondoHR.json` 파일 하나만 연결하고 `data/`는 비어 있는 상태에서** 다시 확인했다. 코드·숫자·정의·분할은 바꾸지 않았다.
+
+### 8-1. 조건
+
+| 항목 | 내용 |
+|---|---|
+| 폴더 | **새로 clone한 폴더**(원본 저장소 커밋 `85878d3`, 원본 저장소 경로에서 clone; GitHub에는 이 커밋들이 없어 pull 대신 로컬 경로를 썼다). 지난 사본의 `data/`를 비우려 했으나 삭제 명령이 안전 점검에 막혀 실행되지 않았고, 우회하지 않고 새 폴더를 만들었다(지난 사본은 그대로 있음). |
+| 원본 데이터 | `endomondoHR.json` **하드 링크 하나만**(복사 아님, 6,568,384,411바이트, sha256 `1c021e3f…36e5` 일치). 새 폴더에는 `data/`가 없었고 `data/final_eval_done.flag`도 없었다. 원본 저장소의 `data/`는 건드리지 않았다. |
+| 실행 순서 | `python run_all.py --prep` → `python run_all.py`(기본) → `python run_all.py --only 25,30,33,34,35,36,37,38,39,40,41`(42의 선행 38·40·41을 만들기 위해 추가) → `python run_all.py --only 42`(flag가 없어 1회 실행) → `python run_all.py --only 43,44,45` → `demo/make_b2_params.py`, `demo/test_coach_demo.py` |
+| 분할 ID | 03이 `run_sessions.pkl`에서 만들었고 고정본과 sha256이 같음을 assert로 확인(train `4e9c1f40…2f9a`, test `57d4c9ad…7ff79`). 만든 파일의 바이트가 원본 저장소의 고정 파일과 같다. |
+| `_with_moving.pkl` | 18c가 만들었고 내용 해시 `9e5c1bdd…78a2` 일치, `duration_sec`로 잘린 세션 42개를 assert로 확인. 원본 저장소 파일과 바이트도 같다. |
+
+### 8-2. 실행 시간과 결과
+
+| 단계 | 소요 | 결과 |
+|---|---|---|
+| `--prep` | 1,473초(24.6분): 01 352초, 08 276초, 16 278초, 17 61초, 04 25초, 06 29초, 10 29초, 18b 294초, 24 89초 외 소단계 | 성공 |
+| 기본 (27, 28, 29, 31, 32) | 1,117초(18.6분): 27 299초, 28 45초, 29 7초, 31 629초, 32 135초 | 성공 |
+| 나머지 (25, 30, 33~41) | 2,231초(37.2분): 25 1445초, 41 590초, 40 65초, 33 46초, 37 45초 외 | 성공 |
+| 42 (최종 평가 1회) | 49초(46초) | 성공, flag 생성(정상) |
+| 43·44·45 | 53초(24·25·2초) | 성공 |
+| `demo/make_b2_params.py`, 단위 테스트 | 3초 미만 | 성공, 11 tests passed |
+
+**전체 4,927초(약 1시간 22분)**, 실패한 단계 없음. 앞 절의 약 3시간 31분과 달리 31번이 628.6초(10.5분)였다(앞 사본의 약 90분과의 차이 원인은 확인하지 못했다). 이 값은 같은 PC 한 대의 측정이다.
+
+### 8-3. 원본 저장소와 대조 (결과 문서·데이터·예측값)
+
+대조 기준은 **원본 저장소의 같은 커밋(`85878d3`) 문서**다(이후 커밋의 문구 정정·새 문서는 대상이 아님). 이번 실행이 다시 쓴 문서 22개 중 **동일 21개, 다름 1개**:
+
+| 파일 | 동일 여부 | 차이 |
+|---|---|---|
+| `docs/baseline_results.md` | 동일 |  |
+| `docs/baseline_results_train.md` | 동일 |  |
+| `docs/coaching_abstain_results.md` | 동일 |  |
+| `docs/coaching_results.md` | 동일 |  |
+| `docs/dataset_counts_5km.md` | 동일 |  |
+| `docs/demo_interval_check.md` | 동일 |  |
+| `docs/environment.md` | 다름 | `--save-predictions` 절만: 원본은 예측값 파일 2개의 sha256 표, 사본은 "저장된 예측값 파일이 없다" 문구(7줄, 수치 차이 아님) |
+| `docs/extreme_session_window_map.md` | 동일 |  |
+| `docs/final_results_5km.md` | 동일 |  |
+| `docs/mlp_results.md` | 동일 |  |
+| `docs/mlp_selected_hyperparams.json` | 동일 |  |
+| `docs/model_comparison.md` | 동일 |  |
+| `docs/model_cv_results_5km.md` | 동일 |  |
+| `docs/multisession_coaching_design.md` | 동일 |  |
+| `docs/ridge_discrepancy.md` | 동일 |  |
+| `docs/ridge_results.md` | 동일 |  |
+| `docs/same_scope_comparison.md` | 동일 |  |
+| `docs/sensitivity_results_5km.md` | 동일 |  |
+| `docs/tree_results.md` | 동일 |  |
+| `docs/week4_data_audit.md` | 동일 |  |
+| `docs/week5_target_check.md` | 동일 |  |
+| `docs/within_person_results_5km.md` | 동일 |  |
+
+이번 실행이 다시 쓰지 않은 문서 25개는 손으로 쓴 정의·사양·감사 문서이거나 이 실행 대상이 아닌 문서다(`docs/docs_inventory.md`). 이번에는 지난번에 재생성되지 않았던 `same_scope_comparison.md`(31번)가 재생성되어 동일했다.
+
+| 산출물 | 결과 |
+|---|---|
+| 새 폴더가 만든 `data/` 파일 28개 vs 원본 `data/` | 바이트 동일 25개, 객체 동일(pickle 바이트만 다름) 3개(run_sessions.pkl, run_sessions_deduped.pkl, run_sessions_merged.pkl), 다른 파일 0개 |
+| `data/final_preds_5km.pkl` | 평가 행(사용자·시점·정답) 동일(cold 352개, personalized 442개), 15개 방법의 예측값 최대 절대 차이 0.0초 |
+| 그림 fig1~4 | 입력 문서·예측값이 같고 PNG 바이트도 4개 모두 같음 |
+
+### 8-4. 핵심 숫자 대조
+
+| 항목 | 기대값 | 새 폴더 생성값 | 결과 |
+|---|---|---|---|
+| 평가 대상 / 사용자(전체) | 2,072 / 349 | 2,072 / 349명 | 일치 |
+| 평가 대상 / 사용자(test) | 352 / 71 | 352 / 71명 | 일치 |
+| B0 사용자 평균 MAE(cold-start) | 266.3 | 266.258 [197.922, 340.025] | 일치 |
+| B2 사용자 평균 MAE(cold-start) | 235.1 | 235.117 [171.885, 311.648] | 일치 |
+| 모델 − B2, Ridge(cold-start) | +9.4 | +9.442 [-1.071, 19.907] | 일치 |
+| 모델 − B2, GBM(cold-start) | +6.2 | +6.192 [-5.070, 17.647] | 일치 |
+| 모델 − B2, MLP(cold-start) | +7.2 | +7.214 [-8.185, 23.401] | 일치 |
+| 모델 − B2, Ridge(personalized) | (원본 문서와 동일해야 함) | +1.855 [-5.618, 9.618] | 일치 |
+| 모델 − B2, GBM(personalized) | (원본 문서와 동일해야 함) | +8.464 [-2.118, 19.043] | 일치 |
+| 모델 − B2, MLP(personalized) | (원본 문서와 동일해야 함) | +23.240 [8.812, 38.457] | 일치 |
+| γ (같은 사람 안 분석, 같은 커밋 기준 문서) | −0.845 | -0.845 [-0.934, -0.757] | 일치 |
+| 80% 범위 실제 포함률(cold-start test / personalized) | 73.9% / 77.8% | 73.9% / 77.8% | 일치 |
+
+### 8-5. 결론과 한계
+
+- **고정 입력은 원본 `endomondoHR.json` 하나뿐이다.** 분할 ID와 `_with_moving`은 코드로 재생성되어 고정본과 같았고, 그 위에서 만든 세션 표·5km 데이터셋·예측값·결과 문서·그림이 원본과 같았다(차이는 `environment.md`의 `--save-predictions` 절뿐).
+- 확인하지 않은 것: `python run_all.py --prep --all`을 한 번에 실행하는 경우(단계를 나눠 실행), `--repeat`, 다른 PC·다른 Python/패키지 버전, 이 실행 이후 커밋(문구 정정 `99e9c25`와 새 문서)의 재현, 새 폴더에서 `run_all`의 "43~45가 예측값 없이 중단" 경로.
