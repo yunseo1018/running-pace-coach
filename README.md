@@ -71,13 +71,15 @@ python demo/bench_demo.py               # docs/demo_performance.md 재생성
 pip install -r requirements.txt        # numpy, pandas, scipy, torch(CPU), matplotlib (Python 3.14.7에서 검증)
 # endomondoHR.json을 프로젝트 루트에 둔다(저장소에 포함되지 않음). 이후 단계는 data/ 파생 캐시가 필요하다.
 python 01_parse_run_sessions.py        # 러닝 세션 추출
-# 02~04, 06, 16~18 등 중복 제거·병합 단계(각 스크립트 docstring 참고, 아래 '이전 과제' 재현 방법과 같음)
-python run_all.py --all                # 25~34(이전 과제), 35~41(5km 데이터 점검·사전 선언 이후 단계), 43·44(사후 분석·민감도), 45(그래프)
+# 고정 입력 3개(분할 ID 2개, run_sessions_deduped_merged_with_moving.pkl)를 data/에 둔 뒤, 번호순이 아니라 아래 순서로 실행(입출력 표: docs/pipeline_order.md, 고정 입력의 출처: docs/split_provenance.md)
+python 08_session_merge.py && python 16_duplicate_dedup.py && python 17_dedup_merge_rebuild.py
+python 02_build_user_sequences.py && python 04_build_xy_dataset.py && python 06_personalized_split.py && python 10_posthoc_distance_condition.py && python 24_build_xy_dataset_extended.py
+python run_all.py --all                # 25~34(이전 과제), 35~41(5km 데이터 점검·train 내부 비교), 42(최종 평가: flag가 없을 때만 1회), 43·44(사후 분석·민감도), 45(그래프)
 python run_all.py --only 43,44,45     # 5km 사후 분석·민감도·그래프만
 ```
 
-- `42_final_eval_5km.py`(test 1회 최종 평가)는 `run_all`에 넣지 않았다. 최종 평가는 한 번만 실행했고(`data/final_eval_done.flag`가 있으면 중단) 결과는 [`docs/final_results_5km.md`](docs/final_results_5km.md)에 있다.
-- `run_all.py` 단계별 소요 시간·옵션은 아래 이전 과제 절의 표를 따른다. 그래프 45번은 결과 문서와 로컬 예측값을 읽기만 한다.
+- `42_final_eval_5km.py`(test 1회 최종 평가)는 `run_all`의 단계이지만 `data/final_eval_done.flag`가 있으면 건너뛴다(결과 고정; 최종 평가는 한 번만 실행했고 결과는 [`docs/final_results_5km.md`](docs/final_results_5km.md)). 새 폴더에서는 flag가 없으므로 한 번 실행되고 이어서 43~45가 실행된다.
+- 소요 시간(재현 점검, Windows 11 PC 한 대, 새 폴더에서 처음부터): 데이터 준비 약 31분 + `run_all` 기본 약 111분(31번이 수정 전 오류로 약 90분 뒤 실패한 시간 포함) + 나머지 단계 등으로 **전체 약 3시간 31분**. 31번 수정 뒤 원본 저장소에서 31→32는 13.8분(31번 11.3분, 32번 2.5분)이었다. 자세한 내용은 [`docs/repro_check_5km.md`](docs/repro_check_5km.md), 순서와 의존 관계는 [`docs/pipeline_order.md`](docs/pipeline_order.md). 그래프 45번은 결과 문서와 로컬 예측값을 읽기만 한다.
 - 데이터 캐시 `data/`와 행별 예측값은 커밋하지 않는다.
 
 ## 데이터 안내
@@ -242,7 +244,7 @@ python run_all.py --only 43,44,45     # 5km 사후 분석·민감도·그래프�
 | [`docs/environment.md`](docs/environment.md) | 패키지 버전, seed, 데이터·분할·하이퍼파라미터 해시, 실행 명령 | `python run_all.py --all` 중 자동 갱신 |
 | [`docs/sklearn_import_issue.md`](docs/sklearn_import_issue.md) | sklearn 로드 오류 진단 기록(실행 시점이 포함되어 바이트 재현성 검증 대상이 아님) | 자동 갱신 |
 
-전체 재생성은 `python run_all.py --all`(약 48분), 일부만 다시 만들 때는 `--only 28,29`처럼 단계 번호를 쉼표로 이어 씁니다. 자세한 옵션은 아래 "재현 방법"을 참고하세요.
+전체 재생성은 `python run_all.py --all`(새 폴더에서 데이터 준비까지 포함해 약 3시간 31분, 재현 점검 측정값 — [`docs/repro_check_5km.md`](docs/repro_check_5km.md), 순서는 [`docs/pipeline_order.md`](docs/pipeline_order.md)), 일부만 다시 만들 때는 `--only 28,29`처럼 단계 번호를 쉼표로 이어 씁니다. 자세한 옵션은 아래 "재현 방법"을 참고하세요.
 
 3주차 산출물의 알려진 한계:
 - 코칭 결과는 합성 목표 기준이며 실제 코칭 효과나 목표 달성의 검증이 아닙니다. 판정 보류는 보류율이 96.4~99.3%로 높아 코칭 품질 향상을 뜻하지 않습니다.
@@ -269,16 +271,16 @@ python run_all.py --only 43,44,45     # 5km 사후 분석·민감도·그래프�
 pip install -r requirements.txt
 # endomondoHR.json 을 프로젝트 루트에 둔다 (저장소에 포함되지 않음)
 python 01_parse_run_sessions.py      # 러닝 세션 추출 -> data/
-# 02~04, 06, 16~18, 21, 23, 24 등 데이터/중복제거/병합/확장 피처 단계 스크립트를 번호순으로 실행 (각 스크립트 docstring에 입출력 명시)
+# 이어서 08 → 16 → 17 → 02 → 04 → 06 → 10 → 24 (필요하면 21, 23). 번호순이 아니다(02가 17의 산출물을 요구). 입출력 표: docs/pipeline_order.md
 python run_all.py                    # 결과 문서 재생성: 27 → 28 → 29 → 31 → 32 (기본)
 ```
 
-`run_all.py` 옵션과 예상 소요 시간(24코어 Windows CPU, 다른 전체 실행 1건이 동시에 돌던 상태에서 측정한 값이며 참고용):
+`run_all.py` 옵션과 소요 시간(재현 점검에서 새 폴더에 처음부터 실행한 Windows 11 PC 한 대의 측정값이며 참고용; 이전 표기는 기본 약 27분, 전체 약 48분):
 
 | 명령 | 포함 단계 | 예상 소요 |
 |---|---|---|
-| `python run_all.py` | 27(MLP) 7.5분, 28(종합표) 0.9분, 29(코칭) 0.8분, 31(동일 입력 범위 비교) 14.5분, 32(판정 보류) 2.8분 | 약 27분 |
-| `python run_all.py --all` | 위 + 25(트리) 20.7분, 30(Ridge 차이 분해) 0.1분, 33(극단 세션 대응) 0.9분 | 약 48분 |
+| `python run_all.py` | 27(MLP) 15.8분, 28(종합표) 2.7분, 29(코칭) 2.3분, 31(동일 입력 범위 비교), 32(판정 보류) | **약 111분**(재현 점검, 31번이 수정 전 오류로 약 90분 뒤 실패한 시간 포함). 31번 수정 뒤 원본 저장소에서 31 11.3분 + 32 2.5분 = 13.8분 |
+| `python run_all.py --all` | 위 + 25(트리) 39.3분, 30 0.1분, 33 1.3분, 35~41(5km 점검·train 내부 비교; 41번 16.0분), 42(최종 평가, flag가 없을 때만 1회) 1.2분, 43~45 1.3분 | 데이터 준비 포함 **전체 약 3시간 31분**(재현 점검 합계) |
 | `python run_all.py --only 28,29` | 지정한 단계만(순서는 고정 순서 유지) | 단계별 합 |
 | `python run_all.py --check` | 각 단계 후 결과 문서를 git HEAD 문서와 대조(IDENTICAL / 진단 줄만 다름 / 텍스트만 다름 / 숫자 변경) | — |
 | `python run_all.py --repeat 2` | 같은 실행을 2회 반복하고 `docs/` 전체가 바이트 단위로 같은지 확인 | 2배 |

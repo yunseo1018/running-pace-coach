@@ -3,11 +3,14 @@
 한 번의 명령으로 결과 문서를 재생성하는 실행기 (10월 3주차 6-4).
 
   python run_all.py                       # 27 → 28 → 29 → 31 → 32 (기본, 순서 고정)
-  python run_all.py --all                 # 25, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 43, 44, 45 전체(고정 순서; 35~45는 --all에서만)
+  python run_all.py --all                 # 25, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45 전체(고정 순서; 35~45는 --all에서만)
   python run_all.py --only 28,29          # 일부만 (순서는 고정 순서를 유지)
   python run_all.py --check               # 각 단계 후 결과 문서를 git HEAD 문서와 대조
   python run_all.py --repeat 2            # 같은 명령을 N회 실행하고 docs/ 전체가 바이트 단위로 같은지 확인
   python run_all.py --save-predictions    # 31번이 data/predictions/에 가명화 예측값 저장(git 제외)
+
+의존 순서: 데이터 준비 단계(01, 08, 16, 17, 02, 04, 06, 10, 24 등)는 이 실행기가 하지 않는다(docs/pipeline_order.md). 41 → 42 → 43 → 44 → 45:
+42번(test 1회 최종 평가)은 data/final_eval_done.flag가 있으면 건너뛰고(결과 고정), 없을 때만(새 폴더) 실행한다. 43~45는 42번이 만든 data/final_preds_5km.pkl이 있어야 하며 없으면 안내와 함께 중단한다.
 
 의존: 27번이 docs/mlp_selected_hyperparams.json(MLP 하이퍼파라미터만)을 저장하고 28·29·31·32·33번이 읽는다.
 이 실행기는 JSON을 읽는 단계가 있는지 소스로 확인하고, 27번 실행 후 JSON 해시를 고정해 이후 단계 도중 바뀌면 중단한다.
@@ -28,6 +31,8 @@ import env_tools
 ROOT = Path(__file__).resolve().parent
 DOCS = ROOT / "docs"
 LOGS = ROOT / "logs"
+FINAL_FLAG = ROOT / "data" / "final_eval_done.flag"       # 42번이 최종 평가 후 만드는 재실행 방지 표식
+FINAL_PREDS = ROOT / "data" / "final_preds_5km.pkl"       # 42번이 저장하는 평가 행별 예측값(43~45가 사용)
 
 STAGES = {
     "25": ("25_tree_models.py", ["docs/tree_results.md"]),
@@ -46,12 +51,13 @@ STAGES = {
     "39": ("39_baselines.py", ["docs/baseline_results_train.md"]),  # 38 다음, train 사용자 내부 기준치(test 미사용), --all 전용
     "40": ("40_models_cv_5km.py", ["docs/model_cv_results_5km.md"]),  # 39 다음, train 내부 모델 비교(test 미사용, 약 2분), --all 전용
     "41": ("41_emlp_cv_5km.py", ["docs/model_cv_results_5km.md"]),  # 40 다음(40이 문서를 다시 쓰므로), 탐색적 E-MLP train 내부(약 25분), --all 전용
+    "42": ("42_final_eval_5km.py", ["docs/final_results_5km.md"]),  # test 1회 최종 평가(flag가 있으면 건너뜀), 43 앞, --all 전용
     "43": ("43_within_person_5km.py", ["docs/within_person_results_5km.md"]),  # 사후 분석(같은 사람 안·공백 코호트), 49c02f8 이후, --all 전용
     "44": ("44_sensitivity_5km.py", ["docs/sensitivity_results_5km.md"]),  # 사전 지정 민감도 S1~S5(약 1분), --all 전용
     "45": ("45_figures_5km.py", ["docs/figures/fig1_mae_ci.png"]),  # 결과 그래프 4개(결과 문서·예측값에서 읽음), --all 전용
 }
 DEFAULT_ORDER = ["27", "28", "29", "31", "32"]
-ALL_ORDER = ["25", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "43", "44", "45"]
+ALL_ORDER = ["25", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45"]
 JSON_READERS = ["28", "29", "31", "32", "33"]
 EXCLUDED_FROM_BYTE_COMPARE = {"sklearn_import_issue.md"}  # 시점이 들어가는 문서
 
@@ -133,7 +139,7 @@ def run_stage(stage, extra_args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--all", action="store_true", help="25,27,...,34,35,36,37,38,39,40,41,43,44,45 전체 (35~45는 기본 실행에 없음)")
+    ap.add_argument("--all", action="store_true", help="25,27,...,41,42,43,44,45 전체 (35~45는 기본 실행에 없음; 42는 flag가 없을 때만 실행)")
     ap.add_argument("--only", default="", help="쉼표로 구분한 단계 번호(예: 28,29)")
     ap.add_argument("--check", action="store_true", help="각 단계 후 결과 문서를 git HEAD 문서와 대조")
     ap.add_argument("--repeat", type=int, default=1, help="같은 실행을 N회 반복하고 docs/ 바이트 동일성 확인")
@@ -158,6 +164,11 @@ def main():
                 check_json_dependency(st)
                 if json_ref is None:
                     raise SystemExit(f"[중단] {STAGES[st][0]}는 docs/mlp_selected_hyperparams.json이 필요하다 — 먼저 27번을 실행")
+            if st == "42" and FINAL_FLAG.exists():
+                print(f"[42] {STAGES[st][0]} 건너뜀: {FINAL_FLAG.name}가 있어 최종 평가는 이미 1회 실행됨(결과 고정)", flush=True)
+                continue
+            if st in ("43", "44", "45") and not FINAL_PREDS.exists():
+                raise SystemExit(f"[중단] {STAGES[st][0]}는 {FINAL_PREDS.relative_to(ROOT)}가 필요하다 — 먼저 42번(최종 평가; flag가 없을 때 1회)을 실행")
             extra = ["--save-predictions"] if (st == "31" and args.save_predictions) else []
             print(f"[{st}] {STAGES[st][0]} 실행 중...", flush=True)
             dt = run_stage(st, extra)
