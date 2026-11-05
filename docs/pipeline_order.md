@@ -4,29 +4,30 @@
 
 ## 1. 먼저 알아야 할 점
 
-- **번호순 실행은 불가능하다.** 02는 17의 산출물(`run_sessions_deduped_merged.pkl`)을 입력으로 쓰고, 17은 03이 만드는 분할 ID 파일을 읽는다(순환, `docs/split_provenance.md`). 분할 ID 두 파일은 고정 입력으로 취급한다(해시는 `docs/environment.md`).
+- **번호순 실행은 불가능하다.** 02는 17의 산출물(`run_sessions_deduped_merged.pkl`)을 입력으로 쓰고, 17은 03이 만드는 분할 ID 파일을 읽는다. 이 순환은 **03이 정제 전 세션 표 `run_sessions.pkl`(01 산출물)에서 6세션 이상 사용자로 분할 ID를 만들도록 고쳐서** 끊었다. 03은 01 직후, 17보다 먼저 실행하며 생성한 목록이 고정본과 sha256까지 같음을 assert로 확인한다(`docs/split_provenance.md`).
 - **`run_sessions_deduped_merged_with_moving.pkl`은 저장소의 어떤 스크립트도 만들지 않는다**(`docs/split_provenance.md` 4절). 이 파일도 고정 입력이다. 24·33번이 읽는다.
-- `run_all.py`는 데이터 준비 단계(01~24)를 실행하지 않는다. 준비 단계는 아래 2절 순서로 직접 실행한다.
+- 데이터 준비 단계(01, 03, 08, 16, 17, 02, 04, 06, 10, 18b, 24, 21, 23)는 `python run_all.py --prep`(원본 `endomondoHR.json`이 있을 때, `data/` 파생 파일을 만들고 덮어씀)으로 아래 2절 순서대로 실행할 수 있다. `--prep --all`은 준비 뒤 3절 전체를 실행한다. 기본·`--all` 실행은 준비 단계를 하지 않는다.
 - 42번(test 1회 최종 평가)은 `data/final_eval_done.flag`가 있으면 스스로 중단한다. `run_all.py`는 flag가 있으면 42번을 건너뛰고(결과 고정), 없으면(새 폴더) 한 번 실행한 뒤 43~45를 실행한다.
 
 ## 2. 데이터 준비 (직접 실행, 이 순서)
 
 | 순서 | 스크립트 | 입력 파일 | 출력 파일 | 선행 |
 |---|---|---|---|---|
-| 0 | (고정 입력) | 원본 `endomondoHR.json`, 고정 `data/train_user_ids.txt`·`data/test_user_ids.txt`, 고정 `data/run_sessions_deduped_merged_with_moving.pkl` | — | — |
+| 0 | (입력) | 원본 `endomondoHR.json`, 고정 `data/run_sessions_deduped_merged_with_moving.pkl`(코드로 만든 파일이 아직 없음) | — | — |
 | 1 | `01_parse_run_sessions.py` | `endomondoHR.json` | `data/run_sessions.pkl` | 0 |
-| 2 | `08_session_merge.py` | `endomondoHR.json`, `data/run_sessions.pkl` | `data/session_gps_endpoints.pkl`, `data/run_sessions_merged.pkl` | 1 |
-| 3 | `16_duplicate_dedup.py` | `endomondoHR.json`, `data/run_sessions.pkl`, `data/session_gps_endpoints.pkl` | `data/session_point_counts.pkl`, `data/run_sessions_deduped.pkl`, `docs/merge_audit/dedup_*.csv`(git 제외) | 2 |
-| 4 | `17_dedup_merge_rebuild.py` | `data/run_sessions.pkl`, `data/run_sessions_merged.pkl`, `data/run_sessions_deduped.pkl`, `data/session_gps_endpoints.pkl`, 분할 ID 두 파일 | `data/run_sessions_deduped_merged.pkl`(메인 세션 표, 105,709건·854명) | 3 |
-| 5 | `02_build_user_sequences.py` | `data/run_sessions_deduped_merged.pkl` | `data/user_sequences.pkl` | 4 |
-| 6 | `04_build_xy_dataset.py` | `data/user_sequences.pkl`, 분할 ID 두 파일 | `data/train_dataset.pkl`, `data/test_dataset.pkl` | 5 |
-| 7 | `06_personalized_split.py` | `data/user_sequences.pkl` | `data/personalized_train_dataset.pkl`, `data/personalized_test_dataset.pkl` | 5 |
-| 8 | `10_posthoc_distance_condition.py` | `data/user_sequences.pkl` | `data/posthoc_train_dataset.pkl`, `data/posthoc_test_dataset.pkl` | 5 |
-| 9 | `24_build_xy_dataset_extended.py` | `data/run_sessions_deduped_merged.pkl`, `data/run_sessions_deduped_merged_with_moving.pkl`(고정 입력) | `data/extended_train_dataset.pkl`, `data/extended_test_dataset.pkl`, `data/extended_personalized_train_dataset.pkl`, `data/extended_personalized_test_dataset.pkl` | 4 |
-| 10 | `21_baseline_integrated_report.py`(선택) | 세션 표, `data/user_sequences.pkl`, 04·06 데이터셋, `data/session_point_counts.pkl` | `docs/baseline_results.md` | 3, 5, 6, 7 |
-| 11 | `23_ridge_regression.py`(선택) | 04·06·10 데이터셋, `data/user_sequences.pkl` | `docs/ridge_results.md` | 6, 7, 8 |
+| 2 | `03_train_test_split.py` | `data/run_sessions.pkl`(6세션 이상 사용자 748명, 정제 전) | `data/train_user_ids.txt`(598명), `data/test_user_ids.txt`(150명). **고정본과 sha256이 같음을 assert**(다르면 쓰지 않고 중단, 이미 있으면 바이트만 비교) | 1 |
+| 3 | `08_session_merge.py` | `endomondoHR.json`, `data/run_sessions.pkl` | `data/session_gps_endpoints.pkl`, `data/run_sessions_merged.pkl` | 1 |
+| 4 | `16_duplicate_dedup.py` | `endomondoHR.json`, `data/run_sessions.pkl`, `data/session_gps_endpoints.pkl` | `data/session_point_counts.pkl`, `data/run_sessions_deduped.pkl`, `docs/merge_audit/dedup_*.csv`(git 제외) | 2 |
+| 5 | `17_dedup_merge_rebuild.py` | `data/run_sessions.pkl`, `data/run_sessions_merged.pkl`, `data/run_sessions_deduped.pkl`, `data/session_gps_endpoints.pkl`, **분할 ID 두 파일(03 산출물)** | `data/run_sessions_deduped_merged.pkl`(메인 세션 표, 105,709건·854명) | 2, 4 |
+| 6 | `02_build_user_sequences.py` | `data/run_sessions_deduped_merged.pkl` | `data/user_sequences.pkl` | 5 |
+| 7 | `04_build_xy_dataset.py` | `data/user_sequences.pkl`, 분할 ID 두 파일 | `data/train_dataset.pkl`, `data/test_dataset.pkl` | 2, 6 |
+| 8 | `06_personalized_split.py` | `data/user_sequences.pkl` | `data/personalized_train_dataset.pkl`, `data/personalized_test_dataset.pkl` | 6 |
+| 9 | `10_posthoc_distance_condition.py` | `data/user_sequences.pkl` | `data/posthoc_train_dataset.pkl`, `data/posthoc_test_dataset.pkl` | 6 |
+| 10 | `24_build_xy_dataset_extended.py` | `data/run_sessions_deduped_merged.pkl`, `data/run_sessions_deduped_merged_with_moving.pkl`(고정 입력) | `data/extended_train_dataset.pkl`, `data/extended_test_dataset.pkl`, `data/extended_personalized_train_dataset.pkl`, `data/extended_personalized_test_dataset.pkl` | 5 |
+| 11 | `21_baseline_integrated_report.py`(선택) | 세션 표, `data/user_sequences.pkl`, 04·06 데이터셋, `data/session_point_counts.pkl` | `docs/baseline_results.md` | 4, 6, 7, 8 |
+| 12 | `23_ridge_regression.py`(선택) | 04·06·10 데이터셋, `data/user_sequences.pkl` | `docs/ridge_results.md` | 7, 8, 9 |
 
-03(`03_train_test_split.py`)은 위 순서에 넣지 않는다. 현재 데이터로 다시 돌리면 고정 목록(598/150)과 다른 배정(593/149)이 만들어지므로 고정 ID 파일을 쓴다(`docs/split_provenance.md`). 정제 전 데이터 기준 03 결과와 고정 목록이 같다는 확인도 그 문서에 있다.
+03은 02의 산출물이 아니라 01의 산출물을 읽도록 고쳤다(이전에는 02의 산출물 `user_sequences.pkl`을 읽어 17과 순환했고, 현재 메인 데이터로 다시 돌리면 593/149가 나왔다). 지금의 03은 고정 목록(598/150)을 sha256까지 같게 재생성한다(`docs/split_provenance.md`).
 
 이전 과제의 부가 단계(결과 문서와 감사용): `05`, `07`, `09`, `11`, `13`, `14`, `15`, `18a`, `18b`, `19`, `20`, `22`. 위 표의 본 파이프라인 산출물에는 필요하지 않다(`18b`는 `with_moving` 고정 입력의 재료 `data/session_moving_duration.pkl`을 만든다).
 
@@ -36,19 +37,19 @@
 
 | 단계 | 스크립트 | 입력 파일 | 출력 파일 | 선행 |
 |---|---|---|---|---|
-| 25 | `25_tree_models.py` | 04·06 데이터셋, 24 데이터셋, `data/user_sequences.pkl` | `docs/tree_results.md` | 준비 5~9 |
-| 27 | `27_mlp_torch.py` | 24 데이터셋, `data/user_sequences.pkl` | `docs/mlp_results.md`, `docs/mlp_selected_hyperparams.json` | 준비 9 |
+| 25 | `25_tree_models.py` | 04·06 데이터셋, 24 데이터셋, `data/user_sequences.pkl` | `docs/tree_results.md` | 준비 6~10 |
+| 27 | `27_mlp_torch.py` | 24 데이터셋, `data/user_sequences.pkl` | `docs/mlp_results.md`, `docs/mlp_selected_hyperparams.json` | 준비 10 |
 | 28 | `28_model_comparison.py` | 24 데이터셋, `docs/mlp_selected_hyperparams.json` | `docs/model_comparison.md` | 27 |
 | 29 | `29_coaching.py` | 24 데이터셋, `docs/mlp_selected_hyperparams.json`, `docs/model_comparison.md` | `docs/coaching_results.md` | 28 |
-| 30 | `30_ridge_discrepancy.py` | 04·06 데이터셋, 24 데이터셋 | `docs/ridge_discrepancy.md` | 준비 6, 7, 9 |
+| 30 | `30_ridge_discrepancy.py` | 04·06 데이터셋, 24 데이터셋 | `docs/ridge_discrepancy.md` | 준비 7, 8, 10 |
 | 31 | `31_same_scope_comparison.py` | 24 데이터셋, `docs/mlp_selected_hyperparams.json`, **`docs/model_comparison.md`의 행 이름(예: "P1. …(탐색적)")** | `docs/same_scope_comparison.md` | 28 |
 | 32 | `32_coaching_abstain.py` | 24 데이터셋, `docs/mlp_selected_hyperparams.json`(28 경유) | `docs/coaching_abstain_results.md` | 28 |
-| 33 | `33_extreme_session_map.py` | 24 데이터셋, `data/user_sequences.pkl`, `data/run_sessions_deduped_merged_with_moving.pkl` | `docs/extreme_session_window_map.md`, `data/extreme_session_window_map.csv`(git 제외) | 준비 9, 28 |
-| 34 | `34_multisession_availability.py` | `data/user_sequences.pkl` | `docs/multisession_coaching_design.md` | 준비 5 |
-| 35 | `35_data_audit_5km.py` | 메인 세션 표(원본 JSON은 파일 정보 표기용) | `docs/week4_data_audit.md` | 준비 4 |
+| 33 | `33_extreme_session_map.py` | 24 데이터셋, `data/user_sequences.pkl`, `data/run_sessions_deduped_merged_with_moving.pkl` | `docs/extreme_session_window_map.md`, `data/extreme_session_window_map.csv`(git 제외) | 준비 10, 28 |
+| 34 | `34_multisession_availability.py` | `data/user_sequences.pkl` | `docs/multisession_coaching_design.md` | 준비 6 |
+| 35 | `35_data_audit_5km.py` | 메인 세션 표(원본 JSON은 파일 정보 표기용) | `docs/week4_data_audit.md` | 준비 5 |
 | 36 | `36_timezone_check.py` | 메인 세션 표, `data/session_gps_endpoints.pkl` | `docs/week4_data_audit.md`에 덧씀 | 35 |
-| 37 | `37_target_feasibility.py` | 원본 JSON, `data/run_sessions.pkl`, `data/run_sessions_deduped.pkl`, 메인 세션 표 | `docs/week5_target_check.md` | 준비 4 |
-| 38 | `38_build_5km_dataset.py` | 원본 JSON, 메인 세션 표, 분할 ID 두 파일 | `data/5km_dataset_train.pkl`, `docs/dataset_counts_5km.md` | 준비 4 |
+| 37 | `37_target_feasibility.py` | 원본 JSON, `data/run_sessions.pkl`, `data/run_sessions_deduped.pkl`, 메인 세션 표 | `docs/week5_target_check.md` | 준비 5 |
+| 38 | `38_build_5km_dataset.py` | 원본 JSON, 메인 세션 표, 분할 ID 두 파일 | `data/5km_dataset_train.pkl`, `docs/dataset_counts_5km.md` | 준비 5 |
 | 39 | `39_baselines.py` | `data/5km_dataset_train.pkl` | `docs/baseline_results_train.md` | 38 |
 | 40 | `40_models_cv_5km.py` | `data/5km_dataset_train.pkl` | `docs/model_cv_results_5km.md`, `data/model_cv_oof_5km.pkl` | 39 |
 | 41 | `41_emlp_cv_5km.py` | `data/5km_dataset_train.pkl`, `data/model_cv_oof_5km.pkl` | `docs/model_cv_results_5km.md`의 E-MLP 절, `data/emlp_oof_5km.pkl` | 40(40이 문서를 다시 쓰므로 반드시 40 뒤) |
@@ -71,8 +72,8 @@
 
 ## 5. 새 폴더에서 처음부터 재현하는 순서 (요약)
 
-1. 저장소를 clone하고 `endomondoHR.json`을 루트에 둔다(sha256 확인). 고정 입력 3개를 `data/`에 둔다(2절 0번).
-2. 2절의 1~9번(필요하면 10·11번)을 순서대로 실행한다.
+1. 저장소를 clone하고 `endomondoHR.json`을 루트에 둔다(sha256 확인). 고정 입력 `run_sessions_deduped_merged_with_moving.pkl`을 `data/`에 둔다(2절 0번; 분할 ID는 03이 재생성한다).
+2. 2절의 1~10번(필요하면 11·12번)을 순서대로 실행한다(`python run_all.py --prep`로 한 번에 가능).
 3. `python run_all.py`(기본) 또는 `python run_all.py --all`을 실행한다. `--all`은 flag가 없으면 42번을 한 번 실행한 뒤 43~45를 실행한다.
 4. (선택) `demo/make_b2_params.py`, `demo/test_coach_demo.py`.
 
