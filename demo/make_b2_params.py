@@ -31,6 +31,7 @@ def _load(path, name):
 
 m39 = _load("39_baselines.py", "m39")
 m43 = _load("43_within_person_5km.py", "m43")
+m55 = _load("scripts/55_interval_calibration_5km.py", "m55")   # 폴드 밖 잔차 분위수(보정 범위 규칙, docs/interval_calibration_spec_5km.md)
 m42 = m43.m42
 PARAMS = Path("demo") / "b2_params.json"
 DOC = Path("docs") / "demo_interval_check.md"
@@ -60,34 +61,39 @@ def main():
     cold = ds[ds.uid.isin(te)].reset_index(drop=True)
     _ptr, pers, _u = m42.personalized_split(ds)
     saved = pd.read_pickle(m42.PRED_OUT)
-    rows = []
+    q10o, q90o, _coefs, _res = m55.oof_quantiles(tr)          # 보정 범위 규칙(시연이 쓰는 범위): train 폴드 밖 잔차의 10%·90% 분위수
+    rules = {"보정(폴드 밖 잔차, 시연에 사용)": (q10o, q90o), "기존(표본 내 잔차)": (q10, q90)}
+    rows = {rn: [] for rn in rules}
     for nm, ev, key in (("cold-start test", cold, "cold"), ("personalized 평가", pers, "pers")):
         pred = a + b * ev.t5_ref_minus_m.to_numpy(float)
         yy = ev.y.to_numpy(float)
-        cov, width = cover(yy, pred, q10, q90)
-        below = float(np.mean(yy < pred + q10))
-        above = float(np.mean(yy > pred + q90))
-        rows.append((nm, len(ev), ev.uid.nunique(), cov, below, above, width))
+        for rn, (r10, r90) in rules.items():
+            cov, width = cover(yy, pred, r10, r90)
+            rows[rn].append((nm, len(ev), ev.uid.nunique(), cov, float(np.mean(yy < pred + r10)), float(np.mean(yy > pred + r90)), width))
         if key == "cold":   # 저장된 49c02f8 B2 예측과 일치 확인
-            s = pd.DataFrame({"uid": saved["cold"]["uid"], "t": saved["cold"]["t"], "p": saved["cold"]["preds"]["B2"]}).sort_values(["uid", "t"])
-            e = pd.DataFrame({"uid": ev.uid, "t": ev.t, "p": pred}).sort_values(["uid", "t"])
-            assert np.allclose(s.p.to_numpy(), e.p.to_numpy())
+            s_ = pd.DataFrame({"uid": saved["cold"]["uid"], "t": saved["cold"]["t"], "p": saved["cold"]["preds"]["B2"]}).sort_values(["uid", "t"])
+            e_ = pd.DataFrame({"uid": ev.uid, "t": ev.t, "p": pred}).sort_values(["uid", "t"])
+            assert np.allclose(s_.p.to_numpy(), e_.p.to_numpy())
+    main_rows = rows["보정(폴드 밖 잔차, 시연에 사용)"]
     params = {"model": "B2 (평균 회귀, LAD)", "source": "49c02f8 cold-start 최종 적합(train 평가 대상 1,720개)", "a": a, "b": b,
-              "resid_q10": q10, "resid_q90": q90, "interval_label": "80% 범위(학습 자료 B2 잔차의 10%·90% 분위수)",
+              "resid_q10": q10o, "resid_q90": q90o, "interval_label": "명목 80% 범위(train 사용자 단위 GroupKFold(5, seed 42) 폴드 밖 잔차의 10%·90% 분위수)",
+              "resid_q10_insample": q10, "resid_q90_insample": q90,
               "n_train": int(len(tr)), "band_sec": BAND,
-              "test_coverage_cold": rows[0][3], "n_test_cold": int(rows[0][1])}
+              "test_coverage_cold": main_rows[0][3], "n_test_cold": int(main_rows[0][1]), "test_coverage_pers": main_rows[1][3], "n_test_pers": int(main_rows[1][1])}
     PARAMS.write_text(json.dumps(params, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
-    lines = ["# 데모 80% 범위 사후 점검 (cold-start test · personalized)", "",
-             "생성: `demo/make_b2_params.py`. **사후 점검**이다(범위는 학습 자료로만 정했고, 점검 결과를 보고 범위·모델을 바꾸지 않는다). 주 결론(49c02f8)을 바꾸지 않으며 상관 기반 예측의 불확실성 표시일 뿐 원인 분석이 아니다. ID·행 값은 싣지 않았다.", "",
+    lines = ["# 데모 명목 80% 범위 점검 (cold-start test · personalized, 탐색 결과)", "",
+             "생성: `demo/make_b2_params.py`. 시연의 범위 규칙은 **train 사용자 단위 GroupKFold(5, seed 42) 폴드 밖 잔차의 10%·90% 분위수**다(사양 `docs/interval_calibration_spec_5km.md`, 결과·CI는 `docs/interval_calibration_5km.md`). "
+             "test는 이미 열람한 자료이므로 아래 포함률은 **탐색 결과**이며 \"검증됐다\"고 쓰지 않는다. 명목 80%는 개인에게 80%를 보장한다는 뜻이 아니다. 주 결론(49c02f8)·모델·정의·분할은 바꾸지 않았다.", "",
              f"- B2: a = {a:.3f}초, b = {b:.4f} (cold-start 학습 자료 1,720개에서 LAD). 정답 y = 다음 5km 기록 − 기준 기록(초).",
-             f"- 80% 범위 = ŷ + [{q10:.1f}, {q90:.1f}]초 (학습 자료 안 B2 잔차 y − ŷ의 10%·90% 분위수, 표본 내 잔차). 이론상 학습 자료 포함률은 약 80%.",
-             "- cold-start 평가의 B2 예측은 49c02f8 저장 예측과 일치함을 assert로 확인했다. personalized 평가도 같은 파라미터(cold-start 학습 자료 기준)를 그대로 적용했다(49c02f8의 personalized B2는 자체 학습 분포에서 적합한 a·b가 다르므로 이 표와 B2 점추정이 다르다).",
+             f"- 시연 범위 = ŷ + [{q10o:.1f}, {q90o:.1f}]초 (폴드 밖 잔차 분위수). 기존 범위(참고) = ŷ + [{q10:.1f}, {q90:.1f}]초 (train 전체 적합의 표본 내 잔차 분위수; `demo/b2_params.json`의 `resid_q10_insample`·`resid_q90_insample`).",
+             "- cold-start 평가의 B2 예측은 49c02f8 저장 예측과 일치함을 assert로 확인했다. personalized 평가도 같은 파라미터(cold-start 학습 자료 기준)를 그대로 쓴다.",
              "- 주의: personalized 평가 행에는 학습 자료(train 사용자)에 속한 사용자의 뒤쪽 기준 시점이 포함되어 학습 사용자 분포와 완전히 독립이 아니다.", "",
-             "| 평가 | 평가 대상 | 사용자 | 실제 포함률 | 범위 아래로 벗어남 | 위로 벗어남 | 범위 폭(초) |", "|---|---|---|---|---|---|---|"]
-    for nm, n, u, c, lo, hi, w in rows:
-        lines.append(f"| {nm} | {n} | {u} | {c*100:.1f}% | {lo*100:.1f}% | {hi*100:.1f}% | {w:.1f} |")
-    lines += ["", "해석(상관·예측 정확도 점검): 포함률이 80%에서 벗어난 정도만 기술한다. 포함률이 80%에 가깝다고 개별 예측이 정확하다는 뜻은 아니며(폭이 크다), 80%보다 낮거나 높으면 학습 자료와 평가 자료의 분포 차이를 시사할 뿐 원인은 미확인이다. 사용자 단위 신뢰구간은 계산하지 않았다.", ""]
+             "| 범위 | 평가 | 평가 대상 | 사용자 | 실제 포함률 | 범위 아래로 벗어남 | 위로 벗어남 | 범위 폭(초) |", "|---|---|---|---|---|---|---|---|"]
+    for rn, rr in rows.items():
+        for nm, n, u, c, lo, hi, w in rr:
+            lines.append(f"| {rn} | {nm} | {n} | {u} | {c*100:.1f}% | {lo*100:.1f}% | {hi*100:.1f}% | {w:.1f} |")
+    lines += ["", "해석(상관·예측 정확도 점검): 포함률이 명목 80%에서 벗어난 정도만 기술한다. 포함률이 80%에 가깝다고 개별 예측이 정확하다는 뜻은 아니며(폭이 크다), 80%보다 낮거나 높으면 학습 자료와 평가 자료의 분포 차이를 시사할 뿐 원인은 미확인이다. 사용자 단위 신뢰구간은 `docs/interval_calibration_5km.md`에 있다.", ""]
     DOC.write_text("\n".join(lines), encoding="utf-8", newline="\n")
     print(json.dumps(params, ensure_ascii=False))
     print("\n".join(lines[8:]))

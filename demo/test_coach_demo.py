@@ -94,7 +94,9 @@ def test_two_term_split_and_coverage_text():
     assert r["a_term"] == -15.0 and abs(r["b_term"] - (-40.0)) < 1e-9 and r["tot_int"] == -55      # -15 + (-0.8 x 50)
     text = cd.format_report(r)
     assert "기본 변화량 a(−15.0초)" in text and "b×(직전 − 평소)(−40.0초)" in text and "예상 변화 약 −55초" in text
-    assert "(범위는 학습 잔차 기준, 테스트에서 실제 포함률 73.9%)" in text and "80% 범위 " in text
+    assert "테스트 포함률 73.9%(탐색 결과), 개인에게 80%를 보장하지 않음" in text and "명목 80% 범위 " in text
+    assert "다음 7일 안에 5km 기록이 관측된 경우를 기준으로 한 예측입니다" in text
+    assert "50초 느렸던 만큼 다음 기록을 평소 쪽에 가깝게 예측했습니다(기록이 평소 주위에서 흔들리는 통계적 현상이며, 원인 효과가 아님)" in text and "때문에" not in text
     assert "중앙값은 약 −15초였음(상관, 인과 아님)" in text
     assert "평균 변화량" not in text and "49c02f8" not in text and "최종 평가 결과(docs/final_results_5km.md)" in text
     # N과 보정 항 일치: 50초 느림 <-> 보정 -40.0 (= -0.8 x 50)

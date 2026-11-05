@@ -128,13 +128,14 @@ def format_report(res):
     ref_s, m_s = int(round(res["ref"])), int(round(res["m"]))
     n = abs(ref_s - m_s)
     if ref_s > m_s:
-        trend = "직전 기록이 평소보다 %d초 느렸기 때문에 평소 쪽으로 돌아오는 경향을 반영했습니다." % n
+        trend = "직전 기록이 평소보다 %d초 느렸던 만큼 다음 기록을 평소 쪽에 가깝게 예측했습니다(기록이 평소 주위에서 흔들리는 통계적 현상이며, 원인 효과가 아님)." % n
     elif ref_s < m_s:
-        trend = "직전 기록이 평소보다 %d초 빨랐기 때문에 평소 쪽으로 돌아오는 경향을 반영했습니다." % n
+        trend = "직전 기록이 평소보다 %d초 빨랐던 만큼 다음 기록을 평소 쪽에 가깝게 예측했습니다(기록이 평소 주위에서 흔들리는 통계적 현상이며, 원인 효과가 아님)." % n
     else:
         trend = "직전 기록이 평소와 같아 평소 쪽으로 돌아오는 보정이 거의 없습니다."
-    return ("다음 7일 안 5km 예상 기록: %s / 80%% 범위 %s ~ %s\n" % (mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"]))
-            + "(범위는 학습 잔차 기준, 테스트에서 실제 포함률 %s)\n" % cov_text(res)
+    return ("다음 7일 안 5km 예상 기록: %s / 명목 80%% 범위 %s ~ %s\n" % (mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"]))
+            + "테스트 포함률 %s(탐색 결과), 개인에게 80%%를 보장하지 않음\n" % cov_text(res)
+            + "다음 7일 안에 5km 기록이 관측된 경우를 기준으로 한 예측입니다\n"
             + "평소 기록(과거 중앙값): %s, 직전 기록: %s\n" % (mmss(res["m"]), mmss(res["ref"]))
             + "예상 변화 약 %s초 = 기본 변화량 a(%s초) + 평소 대비 보정 b×(직전 − 평소)(%s초)\n"
             % (signed(res["tot_int"]), signed1(res["a_term"]), signed1(res["b_term"]))
@@ -183,7 +184,7 @@ def check_numbers(text, res):
             continue
         if ("." in t and t not in dec) or ("." not in t and t not in ints):
             raise ValueError("계산값과 맞지 않는 숫자: " + t)
-    expect = {"포함률": "실제 포함률 %s)" % cov_text(res), "예상 변화": "예상 변화 약 %s초" % signed(res["tot_int"]),
+    expect = {"포함률": "테스트 포함률 %s(탐색 결과)" % cov_text(res), "예상 변화": "예상 변화 약 %s초" % signed(res["tot_int"]),
               "a 항": "기본 변화량 a(%s초)" % signed1(res["a_term"]), "보정 항": "b×(직전 − 평소)(%s초)" % signed1(res["b_term"]),
               "a 설명": "중앙값은 약 %s초였음" % signed(res["a_term"])}
     for k, frag in expect.items():

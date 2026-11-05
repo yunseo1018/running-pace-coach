@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """README 맨 위(5km 과제·데모 절)를 결과 문서와 데모 실행 출력에서 읽은 값으로 채운다. 이전 과제 부록(<!-- OLD_README_BELOW --> 아래)은 그대로 둔다.
-수치 출처: docs/final_results_5km.md((c) 표, 평가 대상·사용자 수), docs/demo_interval_check.md(포함률), docs/demo_performance.md(성능), demo/coach_demo.py 실행 출력.
+수치 출처: docs/final_results_5km.md((c) 표, 평가 대상·사용자 수), docs/demo_interval_check.md(보정 범위의 test 포함률), docs/demo_performance.md(성능), demo/coach_demo.py 실행 출력.
 사용: python scripts/46_fill_readme.py          # README.md 갱신
       python scripts/46_fill_readme.py --check  # 쓰지 않고 현재 README와 같은지만 확인(다르면 종료 코드 1)
 저장소 루트의 README.md만 읽고 쓴다. 같은 입력이면 항상 같은 결과(멱등)."""
@@ -61,7 +61,7 @@ for f, title in ex:
 
 # ---- 포함률·성능
 chk = txt("docs/demo_interval_check.md")
-cov = re.findall(r"\| (cold-start test|personalized 평가) \| (\d+) \| (\d+) \| ([\d.]+)% \|", chk)
+cov = re.findall(r"\| 보정\([^|]*\| (cold-start test|personalized 평가) \| (\d+) \| (\d+) \| ([\d.]+)% \|", chk)   # 시연이 쓰는 보정 범위 행
 assert len(cov) == 2
 perf = txt("docs/demo_performance.md")
 prow = {}
@@ -93,7 +93,7 @@ A("그림 3: **사후 분석**. 연속한 두 5km 사이의 관측된 러닝 기
 A("")
 A("## 시연 프로토타입: 정직한 기대치 코치 (`demo/coach_demo.py`)")
 A("")
-A("위 결론에 따라 모델 대신 **평균 회귀 규칙(B2)만** 사용한다. 직전 28일 안 달리기 4회 이상과 유효 5km 기록 1회 이상이 있어야 예측하고, 부족하면 어떤 조건이 부족한지만 말한다. 예상 변화를 기본 변화량 a(LAD 절편, 평균이 아니라 '직전 기록이 평소와 같을 때'의 조건부 중앙값) 항과 평소 대비 보정 b×(직전 − 평소) 항으로 나눠 소수 1자리 초 값(합계만 정수 초)과 함께 보여주고, 80% 범위는 학습 자료의 B2 잔차 10%·90% 분위수로 정했다(문구에 테스트 실제 포함률을 함께 표기). 출력 문구 속 모든 숫자는 계산값과 일치하는지 자동 검사한다(불일치 시 오류). 표준 라이브러리만 쓴다.")
+A("위 결론에 따라 모델 대신 **평균 회귀 규칙(B2)만** 사용한다. 직전 28일 안 달리기 4회 이상과 유효 5km 기록 1회 이상이 있어야 예측하고, 부족하면 어떤 조건이 부족한지만 말한다. 예상 변화를 기본 변화량 a(LAD 절편, 평균이 아니라 '직전 기록이 평소와 같을 때'의 조건부 중앙값) 항과 평소 대비 보정 b×(직전 − 평소) 항으로 나눠 소수 1자리 초 값(합계만 정수 초)과 함께 보여주고, 명목 80% 범위는 train 사용자 단위 교차검증(GroupKFold) 폴드 밖 잔차의 10%·90% 분위수로 정했다(문구에 test 포함률을 탐색 결과로 함께 적고 개인에게 80%를 보장하지 않는다고 표시). 출력 문구 속 모든 숫자는 계산값과 일치하는지 자동 검사한다(불일치 시 오류). 표준 라이브러리만 쓴다.")
 A("")
 A("```bash")
 A("python demo/coach_demo.py demo/examples/ex2_slower_last.csv --asof 2025-03-03T00:00:00")
@@ -112,7 +112,7 @@ for f, title, out in demo_blocks:
     A(out)
     A("```")
     A("")
-A(f"- **80% 범위 사후 점검**(범위는 학습 자료로만 정했고 점검 후 바꾸지 않음, [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): 실제 포함률 cold-start test {cov[0][3]}%({cov[0][1]}개), personalized {cov[1][3]}%({cov[1][1]}개). 두 평가 모두 목표 80%보다 낮으며(범위가 새 자료에서 더 자주 벗어남) 원인은 미확인이다.")
+A(f"- **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start {cov[0][3]}%({cov[0][1]}개), personalized {cov[1][3]}%({cov[1][1]}개). 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.")
 A(f"- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 {b2c[0]} ms, tracemalloc 최대 {b2c[3]}바이트, 파라미터 파일 {b2c[4]}바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).")
 A("- 이 데모는 원인 분석이나 훈련 처방이 아니며, 모델 정확도의 이점을 주장하지 않는다(현재 자료로 모델과 B2의 우열을 확정할 수 없어 가장 단순한 규칙을 택했다).")
 A("")
@@ -174,7 +174,7 @@ A("")
 A("- 비유의는 동등성의 증명이 아니다. 평가 대상은 cold-start test 352개, personalized 442개로 CI가 넓다.")
 A("- 같은 사람 안 분석·공백 코호트는 사후 분석이며 상관만 보인다. 표본이 작은 공백 구간은 참고용이다.")
 A("- `start_time`의 시각 기준은 미확인이고, T5는 경과 시간 기준이다. 휴식·신호 대기가 포함된다.")
-A("- 80% 범위의 실제 포함률은 사후 점검 값이며 데모는 연구 결과의 시연일 뿐 코칭 효과 검증이 아니다. 실제 사용자 반응은 관찰하지 않았다.")
+A("- 명목 80% 범위의 포함률은 이미 열람한 test에서의 탐색 결과이며 '검증됐다'고 쓰지 않는다. 데모는 연구 결과의 시연일 뿐 코칭 효과 검증이 아니다. 실제 사용자 반응은 관찰하지 않았다.")
 A("")
 A("---")
 A("")
