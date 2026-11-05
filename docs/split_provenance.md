@@ -88,6 +88,13 @@
 | 구간별 개수 | 1초 이하 20개, 1~10초 4개, 10~100초 10개, 100초 초과 8개 |
 | 원인 | 18b의 조각 이동 시간 합이 세션 표의 `duration_sec`(경과 시간)보다 큰 세션이 42개 있어, 저장 파일은 이를 `duration_sec`로 잘랐다(`gap_sec` ≥ 0 보장). 단순 합이면 `gap_sec`가 음수가 된다 |
 
-### 고칠 방법 제안 (구현하지 않음)
+### 정정 결과 (P1-3, 구현됨): 생성 스크립트 추가, DataFrame 내용 일치
+
+- 위 재구성 규칙을 `18c_attach_moving_duration.py`로 구현했다(입력: `run_sessions_deduped_merged.pkl`, `session_moving_duration.pkl`; 출력: `run_sessions_deduped_merged_with_moving.pkl`). `run_all.py --prep`에서 18b 뒤, 24 앞에 실행한다.
+- **현재 고정 파일과 DataFrame 내용이 정확히 같음을 assert로 확인한다**(`pd.testing.assert_frame_equal(..., check_exact=True)`, 105,709행, 열 순서 동일). 확인 결과: 원본 저장소에서 `python 18c_attach_moving_duration.py`가 통과했고(출력 파일이 있어 덮어쓰지 않음), 출력 파일이 없는 빈 폴더에서 새로 만든 결과도 고정 파일과 정확히 같았다. 내용 해시(병합 id를 쉼표 문자열로 바꾼 CSV 텍스트의 sha256) `9e5c1bdd69bc32abf9606673a7242839577da339487cf9b4c2a5f64bb19d78a2`도 일치한다(pickle 직렬화 바이트는 다를 수 있어 내용 해시를 쓴다).
+- **`duration_sec`로 잘리는 세션은 42개**(105,709건의 0.04%, 모두 병합되지 않은 단일 조각 세션)이다. 스크립트가 이 개수를 assert하고 실행할 때 출력한다. 자르지 않으면 `gap_sec`가 음수가 된다.
+- 이제 이 파일도 고정 입력이 아니라 코드로 재생성된다. 이 파일은 `data/`(git 제외)에 있다.
+
+### 고칠 방법 제안 (정정 전 기록, 위 정정 결과로 구현됨)
 
 위 재구성 규칙을 `17` 뒤에 두는 단계(예: `18c_attach_moving_duration.py`)로 저장소에 추가하고, 출력 해시가 `a847a424…`와 같은지 확인한다. 18b가 `session_moving_duration_30s.pkl`·`_120s.pkl` 변형(10월 7일 10:57·11:06 생성)도 만들었지만 커밋된 18b 코드는 기본 한 파일만 쓴다. 변형은 어떤 단계도 읽지 않아 이번 재현에는 영향이 없다(단순 합이 달라지는 것으로 확인, 위 42개와 무관).

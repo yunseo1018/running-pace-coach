@@ -71,9 +71,8 @@ python demo/bench_demo.py               # docs/demo_performance.md 재생성
 pip install -r requirements.txt        # numpy, pandas, scipy, torch(CPU), matplotlib (Python 3.14.7에서 검증)
 # endomondoHR.json을 프로젝트 루트에 둔다(저장소에 포함되지 않음). 이후 단계는 data/ 파생 캐시가 필요하다.
 python 01_parse_run_sessions.py        # 러닝 세션 추출
-# 고정 입력 3개(분할 ID 2개, run_sessions_deduped_merged_with_moving.pkl)를 data/에 둔 뒤, 번호순이 아니라 아래 순서로 실행(입출력 표: docs/pipeline_order.md, 고정 입력의 출처: docs/split_provenance.md)
-python 08_session_merge.py && python 16_duplicate_dedup.py && python 17_dedup_merge_rebuild.py
-python 02_build_user_sequences.py && python 04_build_xy_dataset.py && python 06_personalized_split.py && python 10_posthoc_distance_condition.py && python 24_build_xy_dataset_extended.py
+# 데이터 준비는 번호순이 아니라 아래 순서(01 → 03 → 08 → 16 → 17 → 02 → 04 → 06 → 10 → 18b → 18c → 24 → 21 → 23)이며 한 번에 실행할 수 있다. 다른 입력 파일은 필요 없다(분할 ID는 03, 이동 시간 열은 18c가 코드로 만든다). 입출력 표: docs/pipeline_order.md
+python run_all.py --prep               # 데이터 준비(원본 JSON에서 data/ 파생 파일 생성; 기존 파일을 덮어쓴다)
 python run_all.py --all                # 25~34(이전 과제), 35~41(5km 데이터 점검·train 내부 비교), 42(최종 평가: flag가 없을 때만 1회), 43·44(사후 분석·민감도), 45(그래프)
 python run_all.py --only 43,44,45     # 5km 사후 분석·민감도·그래프만
 ```
@@ -271,7 +270,7 @@ python run_all.py --only 43,44,45     # 5km 사후 분석·민감도·그래프�
 pip install -r requirements.txt
 # endomondoHR.json 을 프로젝트 루트에 둔다 (저장소에 포함되지 않음)
 python 01_parse_run_sessions.py      # 러닝 세션 추출 -> data/
-# 이어서 08 → 16 → 17 → 02 → 04 → 06 → 10 → 24 (필요하면 21, 23). 번호순이 아니다(02가 17의 산출물을 요구). 입출력 표: docs/pipeline_order.md
+# 이어서 데이터 준비: python run_all.py --prep (01 → 03 → 08 → 16 → 17 → 02 → 04 → 06 → 10 → 18b → 18c → 24 → 21 → 23). 번호순이 아니다(02가 17의 산출물을 요구). 입출력 표: docs/pipeline_order.md
 python run_all.py                    # 결과 문서 재생성: 27 → 28 → 29 → 31 → 32 (기본)
 ```
 

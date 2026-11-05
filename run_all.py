@@ -3,7 +3,7 @@
 한 번의 명령으로 결과 문서를 재생성하는 실행기 (10월 3주차 6-4).
 
   python run_all.py                       # 27 → 28 → 29 → 31 → 32 (기본, 순서 고정)
-  python run_all.py --prep                # 데이터 준비 01, 03, 08, 16, 17, 02, 04, 06, 10, 18b, 24, 21, 23 (원본 JSON이 있을 때; data/ 파생 파일을 만든다. 03은 17보다 먼저)
+  python run_all.py --prep                # 데이터 준비 01, 03, 08, 16, 17, 02, 04, 06, 10, 18b, 18c, 24, 21, 23 (원본 JSON이 있을 때; data/ 파생 파일을 만든다. 03은 17보다 먼저)
   python run_all.py --prep --all          # 데이터 준비 + 아래 전체
   python run_all.py --all                 # 25, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45 전체(고정 순서; 35~45는 --all에서만)
   python run_all.py --only 28,29          # 일부만 (순서는 고정 순서를 유지)
@@ -48,6 +48,7 @@ STAGES = {
     "06": ("06_personalized_split.py", []),
     "10": ("10_posthoc_distance_condition.py", []),
     "18b": ("18b_moving_duration_extract.py", []),
+    "18c": ("18c_attach_moving_duration.py", []),                  # _with_moving.pkl 생성(내용 해시 assert), 24·33보다 먼저
     "24": ("24_build_xy_dataset_extended.py", []),
     "21": ("21_baseline_integrated_report.py", ["docs/baseline_results.md"]),
     "23": ("23_ridge_regression.py", ["docs/ridge_results.md"]),
@@ -73,7 +74,7 @@ STAGES = {
     "44": ("44_sensitivity_5km.py", ["docs/sensitivity_results_5km.md"]),  # 사전 지정 민감도 S1~S5(약 1분), --all 전용
     "45": ("45_figures_5km.py", ["docs/figures/fig1_mae_ci.png"]),  # 결과 그래프 4개(결과 문서·예측값에서 읽음), --all 전용
 }
-PREP_ORDER = ["01", "03", "08", "16", "17", "02", "04", "06", "10", "18b", "24", "21", "23"]   # 03은 17보다 먼저(01 산출물만 읽음)
+PREP_ORDER = ["01", "03", "08", "16", "17", "02", "04", "06", "10", "18b", "18c", "24", "21", "23"]   # 03은 17보다 먼저(01 산출물만 읽음)
 DEFAULT_ORDER = ["27", "28", "29", "31", "32"]
 ALL_ORDER = ["25", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45"]
 JSON_READERS = ["28", "29", "31", "32", "33"]
@@ -158,7 +159,7 @@ def run_stage(stage, extra_args):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--all", action="store_true", help="25,27,...,41,42,43,44,45 전체 (35~45는 기본 실행에 없음; 42는 flag가 없을 때만 실행)")
-    ap.add_argument("--prep", action="store_true", help="데이터 준비 단계(01, 03, 08, 16, 17, 02, 04, 06, 10, 18b, 24, 21, 23)를 먼저 실행(원본 endomondoHR.json 필요, data/ 파생 파일 생성)")
+    ap.add_argument("--prep", action="store_true", help="데이터 준비 단계(01, 03, 08, 16, 17, 02, 04, 06, 10, 18b, 18c, 24, 21, 23)를 먼저 실행(원본 endomondoHR.json 필요, data/ 파생 파일 생성)")
     ap.add_argument("--only", default="", help="쉼표로 구분한 단계 번호(예: 28,29)")
     ap.add_argument("--check", action="store_true", help="각 단계 후 결과 문서를 git HEAD 문서와 대조")
     ap.add_argument("--repeat", type=int, default=1, help="같은 실행을 N회 반복하고 docs/ 바이트 동일성 확인")
