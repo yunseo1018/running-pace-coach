@@ -124,6 +124,7 @@ A("# endomondoHR.json을 프로젝트 루트에 둔다(저장소에 포함되지
 A("python 01_parse_run_sessions.py        # 러닝 세션 추출")
 A("# 데이터 준비는 번호순이 아니라 아래 순서(01 → 03 → 08 → 16 → 17 → 02 → 04 → 06 → 10 → 18b → 18c → 24 → 21 → 23)이며 한 번에 실행할 수 있다. 다른 입력 파일은 필요 없다(분할 ID는 03, 이동 시간 열은 18c가 코드로 만든다). 입출력 표: docs/pipeline_order.md")
 A("python run_all.py --prep               # 데이터 준비(원본 JSON에서 data/ 파생 파일 생성; 기존 파일을 덮어쓴다)")
+A("python run_all.py --through42         # 기본 5단계 + 42의 선행(25, 30, 33~41) + 42까지 한 번에(42는 flag가 없을 때만 1회); 실행 순서만 보려면 --list를 덧붙인다")
 A("python run_all.py --all                # 25~34(이전 과제), 35~41(5km 데이터 점검·train 내부 비교), 42(최종 평가: flag가 없을 때만 1회), 43·44(사후 분석·민감도), 45(그래프)")
 A("python run_all.py --only 43,44,45     # 5km 사후 분석·민감도·그래프만")
 A("```")

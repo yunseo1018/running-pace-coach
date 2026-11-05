@@ -5,6 +5,8 @@
   python run_all.py                       # 27 → 28 → 29 → 31 → 32 (기본, 순서 고정)
   python run_all.py --prep                # 데이터 준비 01, 03, 08, 16, 17, 02, 04, 06, 10, 18b, 18c, 24, 21, 23 (원본 JSON이 있을 때; data/ 파생 파일을 만든다. 03은 17보다 먼저)
   python run_all.py --prep --all          # 데이터 준비 + 아래 전체
+  python run_all.py --through42           # 기본 5단계 + 42의 선행(25, 30, 33~41) + 42까지 한 번에(42는 flag가 없을 때만 1회). 25, 27, ..., 41, 42
+  python run_all.py --list                # 실행하지 않고 실행 순서만 출력(--prep/--all/--through42/--only와 함께)
   python run_all.py --all                 # 25, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45 전체(고정 순서; 35~45는 --all에서만)
   python run_all.py --only 28,29          # 일부만 (순서는 고정 순서를 유지)
   python run_all.py --check               # 각 단계 후 결과 문서를 git HEAD 문서와 대조
@@ -160,13 +162,16 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--all", action="store_true", help="25,27,...,41,42,43,44,45 전체 (35~45는 기본 실행에 없음; 42는 flag가 없을 때만 실행)")
     ap.add_argument("--prep", action="store_true", help="데이터 준비 단계(01, 03, 08, 16, 17, 02, 04, 06, 10, 18b, 18c, 24, 21, 23)를 먼저 실행(원본 endomondoHR.json 필요, data/ 파생 파일 생성)")
+    ap.add_argument("--through42", action="store_true", help="25,27,...,41,42까지(= --all에서 43~45를 뺀 순서). 42는 flag가 없을 때만 실행")
+    ap.add_argument("--list", action="store_true", help="실행하지 않고 실행 순서만 출력하고 종료")
     ap.add_argument("--only", default="", help="쉼표로 구분한 단계 번호(예: 28,29)")
     ap.add_argument("--check", action="store_true", help="각 단계 후 결과 문서를 git HEAD 문서와 대조")
     ap.add_argument("--repeat", type=int, default=1, help="같은 실행을 N회 반복하고 docs/ 바이트 동일성 확인")
     ap.add_argument("--save-predictions", action="store_true", help="31번이 data/predictions/에 가명화 예측값 저장")
     args = ap.parse_args()
 
-    order = ALL_ORDER if args.all else ([] if args.prep else DEFAULT_ORDER)
+    through42 = ALL_ORDER[:ALL_ORDER.index("42") + 1]
+    order = ALL_ORDER if args.all else (through42 if args.through42 else ([] if args.prep else DEFAULT_ORDER))
     if args.prep:
         order = PREP_ORDER + order
     if args.only:
@@ -176,6 +181,8 @@ def main():
             raise SystemExit(f"알 수 없는 단계: {bad} (가능: {sorted(STAGES)})")
         order = [s for s in PREP_ORDER + ALL_ORDER if s in want]
     print(f"실행 순서: {' → '.join(order)} (반복 {args.repeat}회)")
+    if args.list:
+        return
 
     manifests, timing_rows, check_rows = [], [], []
     for rep in range(1, args.repeat + 1):

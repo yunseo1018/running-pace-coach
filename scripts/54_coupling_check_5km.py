@@ -5,7 +5,7 @@
 (a) m_ex(기준 기록을 뺀 t 이전 유효 5km 중앙값, 없으면 제외)로 43번 within OLS의 γ를 재추정(+ 같은 표본에서 원래 x로 추정한 대조).
 (b) 귀무: 사용자 안에서 정답 T5(= y + T5(기준))를 섞어 y* = T5*(정답) - T5(기준)으로 γ를 다시 추정, 1,000회, seed 42.
 검산: 43번의 γ(-0.845)를 같은 코드로 재현(assert). ID·행 값은 출력·저장하지 않는다.
-사용법(저장소 루트): python scripts/48_coupling_check_5km.py   (run_all에는 넣지 않음)
+사용법(저장소 루트): python scripts/54_coupling_check_5km.py   (run_all에는 넣지 않음)
 출력: docs/coupling_check_5km.md
 """
 import importlib.util
@@ -159,7 +159,7 @@ def main():
         where = "원래 γ는 귀무 2.5%~97.5% 구간 안으로, 귀무에서 흔히 나오는 범위다"
 
     out = ["# 사후 탐색 결과: γ의 수학적 결합 점검 (5km 과제)", "",
-           f"생성: `scripts/48_coupling_check_5km.py`. 사양: `docs/posthoc_spec_coupling_5km.md`(커밋 {SPEC_COMMIT}, 분석 실행 전 고정). **사후 탐색**(test 정답을 본 뒤의 분석)이며 상관관계까지만 주장한다. "
+           f"생성: `scripts/54_coupling_check_5km.py`. 사양: `docs/posthoc_spec_coupling_5km.md`(커밋 {SPEC_COMMIT}, 분석 실행 전 고정). **사후 탐색**(test 정답을 본 뒤의 분석)이며 상관관계까지만 주장한다. "
            "**어떤 결과가 나와도 γ를 훈련·회복 효과로 해석하지 않으며 인과·처방 표현을 쓰지 않는다.** 주 결론(49c02f8)·모델·정의·범위·시연 예측식은 바꾸지 않았다. 모든 평가는 \"다음 7일 안에 적격 5km 기록이 관측된 경우\"에 조건부다. ID·행 값은 싣지 않았다.", "",
            "배경: y = T5(정답) − T5(기준)과 x = T5(기준) − m에 같은 T5(기준)이 **반대 부호로** 들어가므로, 정답 T5가 기준 기록과 무관해도 γ는 이 결합과 측정 오차만으로 음수가 될 수 있다.", "",
            "## 1. 표본과 검산", "",
