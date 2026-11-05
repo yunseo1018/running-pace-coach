@@ -60,3 +60,4 @@
 - 사양 고정 커밋 이후 실행·열람: `docs/posthoc_spec_hr_5km.md`(커밋 9d2efda) 고정 뒤 `scripts/47_hr_posthoc_5km.py`를 실행하고 `docs/hr_posthoc_results_5km.md`(r의 분포, 주·보조 모형 계수와 CI)를 열람했다. 사후 탐색이며 주 결론(49c02f8)·시연 예측식·사양을 이 결과로 바꾸지 않는다.
 - 사양 고정 커밋 이후 실행·열람(사용자별 짝지은 오차 차이): `docs/posthoc_spec_paired_5km.md`(커밋 99950af) 고정 뒤 `scripts/49_paired_user_diff_5km.py`를 실행하고 `docs/paired_user_diff_5km.md`를 열람했다. 49c02f8 저장 예측값만 사용한 사후 탐색이며 주 결론·모델·정의·시연 예측식을 바꾸지 않는다.
 - 표본 감소 표(`docs/sample_reduction_5km.md`, `scripts/48_sample_reduction_5km.py`)는 평가 대상 개수와 사용자 수만 센 것이며 기록 변화(초)·T5 값의 분포는 계산하지 않았다.
+- 보간 간격 집계(`docs/sample_reduction_5km.md` 3절, `scripts/50_interp_gap_5km.py`): 평가 대상의 기준 기록·정답 세션에서 보간에 쓴 두 점의 시간·거리 간격만 집계했다. 기록 변화(초)·T5 값의 분포는 계산하지 않았다.
