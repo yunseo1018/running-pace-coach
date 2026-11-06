@@ -316,7 +316,7 @@ def format_goal(res, goal_sec, params):
     q10, q90 = params["resid_q10"], params["resid_q90"]
     width_min = int(round((q90 - q10) / 60.0))
     fast = abs(int(round(q10)))
-    s1 = "범위 안이라는 것은 달성 확률이 아니며, 훈련 처방을 제공하지 않습니다."
+    s1 = "범위 안·밖은 달성 확률이나 달성 가능 여부를 뜻하지 않으며, 훈련 처방을 제공하지 않습니다."
     s2 = ("현재 범위 폭은 약 %d분(%s초 ~ %s초)으로 넓어, 예측보다 약 %d분 %d초 빠른 목표까지 범위 안으로 표시됩니다."
           % (width_min, signed(q10), signed(q90), fast // 60, fast % 60))
     text = ("목표 비교(목표 %s): %s\n" % (mmss(goal_sec), label)

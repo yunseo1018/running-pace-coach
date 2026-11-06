@@ -330,7 +330,7 @@ def test_goal_difference_sign_and_words():
 def test_goal_required_sentences_use_numbers_from_params():
     r = _res_with_range()
     text, info = cd.format_goal(r, 1445, P)
-    assert "범위 안이라는 것은 달성 확률이 아니며, 훈련 처방을 제공하지 않습니다." in text
+    assert "범위 안·밖은 달성 확률이나 달성 가능 여부를 뜻하지 않으며, 훈련 처방을 제공하지 않습니다." in text
     # P: q10 = -200, q90 = +280 -> 폭 480초 = 약 8분, 200초 = 3분 20초
     assert "현재 범위 폭은 약 8분(−200초 ~ +280초)으로 넓어, 예측보다 약 3분 20초 빠른 목표까지 범위 안으로 표시됩니다." in text
     p2 = dict(P, resid_q10=-202.1, resid_q90=277.9)                  # 현재 b2_params.json과 같은 크기의 값
