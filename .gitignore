@@ -19,3 +19,9 @@ docs/merge_audit/
 # 재현성 로그(sklearn 진단, run_all 단계 로그/타이밍) — 커밋하지 않음
 logs/
 !demo/b2_params.json
+
+# 개인 건강 데이터(애플 건강 내보내기 등): 절대 커밋하지 않는다
+my_runs/
+*.mine.csv
+apple_health_export/
+*.zip

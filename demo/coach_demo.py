@@ -4,7 +4,8 @@
 다음 7일 안 5km 기록을 '평균 회귀' 규칙(B2)으로 예측하고 명목 80% 범위와 함께 보여준다.
 표준 라이브러리만 사용한다. 모델 학습 코드는 없다(a, b, 잔차 분위수는 demo/b2_params.json, 49c02f8 cold-start 최종 적합 + 보정 범위).
 
-입력 CSV 열: start_time, end_time, distance_km, duration_sec, avg_hr, t5_sec
+입력 CSV 열: start_time, end_time, distance_km, duration_sec, t5_sec (선택: avg_hr, stop_sec, source 등 그 밖의 열은 무시)
+  - avg_hr: 선택 열이며 예측에 쓰지 않는다(없거나 비어 있어도 예측 동일)
   - start_time/end_time: 에포크 초 또는 ISO 일시(시간대 표기가 없으면 UTC로 두고 일관되게만 사용; 시각 기준 미확인)
   - t5_sec: 5.0~5.5km 세션에서 5.000km 지점 도달 시간(초). 그 외 세션은 비움
   - stop_sec(선택 열): 세션 안 정지 시간(초; 시간차>0이고 속도 1km/h 미만인 점 사이 구간의 합). 없으면 정지 시간 조건은 확인하지 않는다
@@ -37,7 +38,7 @@ KM_LO, KM_HI = 5.0, 5.5
 GOAL_MIN_SEC, GOAL_MAX_SEC = 600, 5000
 PARAMS_PATH = Path(__file__).resolve().parent / "b2_params.json"
 NOTES_PATH = Path(__file__).resolve().parent / "stratum_notes.json"
-REQUIRED_COLS = ["start_time", "end_time", "distance_km", "duration_sec", "avg_hr", "t5_sec"]
+REQUIRED_COLS = ["start_time", "end_time", "distance_km", "duration_sec", "t5_sec"]      # avg_hr는 선택 열(예측에 쓰지 않음)
 STOP_COL = "stop_sec"          # 선택 열(초): 세션 안 정지 시간. docs/demo_stratum_note_spec.md 5절
 EXAMPLE_CMD = "python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00"
 

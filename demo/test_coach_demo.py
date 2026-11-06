@@ -138,7 +138,7 @@ import io
 import tempfile
 
 NOW = ASOF + 10 * cd.DAY          # 테스트용 현재 시각(기준 시점보다 10일 뒤)
-HEADER = ",".join(cd.REQUIRED_COLS)
+HEADER = "start_time,end_time,distance_km,duration_sec,avg_hr,t5_sec"
 
 
 def _write(tmp, name, text):
@@ -566,6 +566,19 @@ def test_example_outputs_match_live_runs_and_cover_each_stratum():
     assert "평소 쪽으로 +5.5초 움직였지만" in seen["ex11_trend_smaller_a.out.txt"] and "직전 기록보다 10초 빠릅니다" in seen["ex11_trend_smaller_a.out.txt"]
     assert "직전 기록보다" in seen["ex12_trend_larger_a.out.txt"] and "느립니다(평소 쪽)" in seen["ex12_trend_larger_a.out.txt"]
     assert "※ 이 조건" in seen["ex10_multi.out.txt"] and seen["ex10_multi.out.txt"].count("※ 이 조건") == 3
+
+
+def test_avg_hr_column_is_optional_and_does_not_change_prediction():
+    with tempfile.TemporaryDirectory() as tmp:
+        rows = _rows_clean()
+        with_hr = _csv_stop(tmp, rows, "with_hr.csv")
+        text = Path(with_hr).read_text(encoding="utf-8").split(chr(10))
+        no_hr = [",".join(c for i, c in enumerate(l.split(",")) if i != 4) for l in text]            # avg_hr(5번째 열) 제거
+        p_no = _write(tmp, "no_hr.csv", chr(10).join(no_hr))
+        blank = [text[0]] + [",".join("" if i == 4 else c for i, c in enumerate(l.split(","))) for l in text[1:] if l]
+        p_blank = _write(tmp, "blank_hr.csv", chr(10).join(blank) + chr(10))
+        t0 = cd.run(with_hr, str(ASOF), P, now=NOW)[1]
+        assert cd.run(p_no, str(ASOF), P, now=NOW)[1] == t0 and cd.run(p_blank, str(ASOF), P, now=NOW)[1] == t0
 
 
 if __name__ == "__main__":
