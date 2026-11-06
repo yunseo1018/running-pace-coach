@@ -52,12 +52,18 @@ n_cold = re.search(r"평가 기준 시점 (\d+)개, 사용자 (\d+)명", fin)
 n_pers = re.search(r"평가 기준 시점 (\d+)개, 사용자 (\d+)명", fin[fin.index("## B."):])
 
 # ---- 데모 출력
-ex = [("ex1_steady", "① 꾸준히 달린 사람"), ("ex2_slower_last", "② 직전 기록이 평소보다 느렸던 사람"), ("ex3_no_5km", "③ 자격 미달(5km 기록 없음)")]
+ex = [("ex1_steady", "① 꾸준히 달린 사람", None), ("ex2_slower_last", "② 직전 기록이 평소보다 느렸던 사람", None), ("ex3_no_5km", "③ 자격 미달(5km 기록 없음)", None),
+      ("ex4_few_runs", "④ 자격 미달(달리기 2회, 5km 기록이 5.0~5.5km 범위 밖)", None),
+      ("ex1_steady", "⑤ 목표 비교: 목표 20:00 → 명목 범위보다 빠름", "20:00"), ("ex1_steady", "⑥ 목표 비교: 목표 24:00 → 명목 범위 안", "24:00"),
+      ("ex1_steady", "⑦ 목표 비교: 목표 30:00 → 명목 범위보다 느림", "30:00")]
 demo_blocks = []
-for f, title in ex:
-    r = subprocess.run([sys.executable, "-I", "demo/coach_demo.py", f"demo/examples/{f}.csv", "--asof", "2025-03-03T00:00:00"], cwd=ROOT,
-                       capture_output=True, text=True, encoding="utf-8", check=True)
-    demo_blocks.append((f, title, r.stdout.strip()))
+for f, title, goal in ex:
+    cmd = [sys.executable, "-I", "demo/coach_demo.py", f"demo/examples/{f}.csv", "--asof", "2025-03-03T00:00:00"] + (["--goal", goal] if goal else [])
+    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True)
+    out = r.stdout.strip()
+    if goal:                                    # 목표 비교는 ①의 예측 출력 뒤에 이어지는 부분만 싣는다
+        out = out[out.index("목표 비교("):]
+    demo_blocks.append((f, title, out, goal))
 
 # ---- 포함률·성능
 chk = txt("docs/demo_interval_check.md")
@@ -97,21 +103,25 @@ A("위 결론에 따라 모델 대신 **평균 회귀 규칙(B2)만** 사용한�
 A("")
 A("```bash")
 A("python demo/coach_demo.py demo/examples/ex2_slower_last.csv --asof 2025-03-03T00:00:00")
+A("python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00 --goal 24:00   # 목표 비교(예측 범위와 목표를 비교)")
 A(f"python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, {n_tests}개)")
 A("python demo/make_examples.py            # 합성 예시 CSV 재생성(seed 고정)")
 A("python demo/make_b2_params.py           # b2_params.json과 docs/demo_interval_check.md 재생성(로컬 data/ 필요)")
 A("python demo/bench_demo.py               # docs/demo_performance.md 재생성")
 A("```")
 A("")
-A("입력 CSV 열: `start_time, end_time, distance_km, duration_sec, avg_hr, t5_sec`(5km 세션만 t5_sec = 5.000km 도달 시간, 그 외 비움). 예시 3개는 **직접 만든 합성 데이터**이며 실제 데이터와 무관하다(데이터 재배포 금지).")
+A("입력 CSV 열: `start_time, end_time, distance_km, duration_sec, avg_hr, t5_sec`(5km 세션만 t5_sec = 5.000km 도달 시간, 그 외 비움). 예시는 **직접 만든 합성 데이터**이며 실제 데이터와 무관하다(데이터 재배포 금지).")
 A("")
-for f, title, out in demo_blocks:
-    A(f"**{title}** (`demo/examples/{f}.csv`, 기준 시점 2025-03-03)")
+for f, title, out, goal in demo_blocks:
+    cmd_note = f"`--goal {goal}`, 위 ①의 예측 출력 뒤에 이어지는 부분" if goal else "기준 시점 2025-03-03"
+    A(f"**{title}** (`demo/examples/{f}.csv`, {cmd_note})")
     A("")
     A("```text")
     A(out)
     A("```")
     A("")
+A("- **입력·옵션 문제는 멈추지 않고 안내한다**: 파일 없음·비어 있음·열 없음, 날짜·시간 형식 오류, 미래 날짜(제외하고 안내), 같은 시각의 중복 기록(제외하고 안내), 자격 미달(무엇이 몇 개 부족한지), 5km 기록이 5.0~5.5km 범위 밖이거나 극단(T5 > 5,000초)이면 그 이전의 유효 기록을 쓰고 그 사실을 표시한다. 문제는 \"오류: 이유 / 해결: 방법\" 두 줄과 종료 코드 2로 알린다. 예측 시점에 관측 가능한 입력만 쓰고 미래 값으로 거르는 규칙은 없다.")
+A("- **`--goal mm:ss`**: 목표(10:00~83:20)를 명목 범위와 비교해 \"명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림\" 중 하나와 예측−목표 차이(초)를 보여 준다. 범위 안이라는 것은 달성 확률이 아니며 훈련 처방을 제공하지 않는다. 목표를 넣지 않으면 출력은 기존과 같다.")
 A(f"- **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start {cov[0][3]}%({cov[0][1]}개), personalized {cov[1][3]}%({cov[1][1]}개). 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.")
 A(f"- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 {b2c[0]} ms, tracemalloc 최대 {b2c[3]}바이트, 파라미터 파일 {b2c[4]}바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).")
 A("- 이 데모는 원인 분석이나 훈련 처방이 아니며, 모델 정확도의 이점을 주장하지 않는다(현재 자료로 모델과 B2의 우열을 확정할 수 없어 가장 단순한 규칙을 택했다).")

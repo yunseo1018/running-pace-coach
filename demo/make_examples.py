@@ -48,7 +48,35 @@ def main():
     write("ex2_slower_last.csv", build(rng, [0, 2, 4, 7], 1500.0, 150.0))
     # 3) 자격 미달: 달리기는 있으나 5km 기록 없음
     write("ex3_no_5km.csv", build(rng, [], 1500.0, 0.0))
+    # 4) 자격 미달(달리기 2회 + 5km 기록이 5.0~5.5km 범위 밖): 부족한 개수와 제외 이유 표시용. 난수를 쓰지 않아 위 예시에 영향 없음
+    write("ex4_few_runs.csv", [["2025-02-20T07:00:00", "2025-02-20T07:20:00", 3.5, 1200, 148, ""],
+                               ["2025-02-26T07:00:00", "2025-02-26T07:31:00", 5.8, 1860, 155, 1560.0]])
     print("saved", sorted(p.name for p in OUT.glob("*.csv")))
+    write_outputs()
+
+
+# (CSV, 목표, 출력 파일): 기준 시점은 모두 2025-03-03. 목표를 넣지 않은 출력은 기존 예시 출력과 같다.
+ASOF_TEXT = "2025-03-03T00:00:00"
+OUTPUTS = [("ex1_steady.csv", None, "ex1_steady.out.txt"), ("ex2_slower_last.csv", None, "ex2_slower_last.out.txt"), ("ex3_no_5km.csv", None, "ex3_no_5km.out.txt"),
+           ("ex1_steady.csv", "20:00", "ex1_goal_faster.out.txt"), ("ex1_steady.csv", "24:00", "ex1_goal_inside.out.txt"), ("ex1_steady.csv", "30:00", "ex1_goal_slower.out.txt"),
+           ("ex4_few_runs.csv", None, "ex4_few_runs.out.txt")]
+
+
+def write_outputs():
+    """예시 CSV로 coach_demo를 실행해 출력 파일(.out.txt)을 만든다(명령줄 실행과 같은 출력)."""
+    import contextlib
+    import io
+    import sys
+    sys.path.insert(0, str(OUT.parent))
+    import coach_demo
+    for csv_name, goal, out_name in OUTPUTS:
+        argv = [str(OUT / csv_name), "--asof", ASOF_TEXT] + (["--goal", goal] if goal else [])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = coach_demo.main(argv)
+        assert code == 0, (csv_name, goal, code)
+        (OUT / out_name).write_text(buf.getvalue(), encoding="utf-8", newline="\n")
+    print("saved outputs", [o for _c, _g, o in OUTPUTS])
 
 
 if __name__ == "__main__":

@@ -67,7 +67,7 @@
 | 스크립트 | 입력 | 출력 | 선행 |
 |---|---|---|---|
 | `demo/make_b2_params.py` | `data/5km_dataset_train.pkl`, `data/final_preds_5km.pkl`, 원본 JSON 캐시(`data/t5_main_all.pkl`) | `demo/b2_params.json`, `docs/demo_interval_check.md` | 42, 43 |
-| `demo/make_examples.py`, `demo/coach_demo.py`, `demo/test_coach_demo.py` | `demo/b2_params.json`(예시 CSV는 합성) | `demo/examples/*.csv`, 화면 출력 | `demo/make_b2_params.py` |
+| `demo/make_examples.py`, `demo/coach_demo.py`, `demo/test_coach_demo.py` | `demo/b2_params.json`(예시 CSV는 합성) | `demo/examples/*.csv`와 각 출력 `demo/examples/*.out.txt`(목표 비교 예시 포함), 화면 출력 | `demo/make_b2_params.py` |
 | `demo/bench_demo.py` | `data/5km_dataset_train.pkl`, `docs/model_cv_results_5km.md`, `demo/b2_params.json` | `docs/demo_performance.md` | 40~42 |
 | `scripts/46_fill_readme.py` | `docs/final_results_5km.md`, `docs/demo_interval_check.md`, `docs/demo_performance.md`, `demo/examples/*.csv` | `README.md`(맨 위 5km 절) | 위 결과 문서 |
 | `scripts/47_hr_posthoc_5km.py` | `data/final_preds_5km.pkl`, `data/t5_main_all.pkl`, 메인 세션 표 | `docs/hr_posthoc_results_5km.md` | 42, 43 |
