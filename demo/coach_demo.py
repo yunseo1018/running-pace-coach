@@ -7,6 +7,8 @@
 입력 CSV 열: start_time, end_time, distance_km, duration_sec, avg_hr, t5_sec
   - start_time/end_time: 에포크 초 또는 ISO 일시(시간대 표기가 없으면 UTC로 두고 일관되게만 사용; 시각 기준 미확인)
   - t5_sec: 5.0~5.5km 세션에서 5.000km 지점 도달 시간(초). 그 외 세션은 비움
+  - stop_sec(선택 열): 세션 안 정지 시간(초; 시간차>0이고 속도 1km/h 미만인 점 사이 구간의 합). 없으면 정지 시간 조건은 확인하지 않는다
+조건별 안내(demo/stratum_notes.json): train 폴드 밖 포함률의 95% CI 상한이 80% 미만인 층에 해당하면 안내 줄을 모두 표시한다(범위 폭은 바꾸지 않음; docs/demo_stratum_note_spec.md).
 사용: python demo/coach_demo.py 세션.csv --asof 2025-01-06T00:00:00 [--goal 24:30]
 자격(주 분석 정의 그대로): 기준 시점 직전 28일 안에 끝난 달리기 4회 이상 + 그 창 안 유효 5km 기록 1회 이상(t5_sec <= 5000초, 5.0~5.5km).
 기준 기록 = 창 안 가장 늦게 시작한 유효 5km. 평소 기록 m = 기준 시점 전에 끝난 유효 5km의 중앙값(1회뿐이면 m = 기준 기록).
@@ -34,7 +36,9 @@ EXTREME_SEC = 5000.0
 KM_LO, KM_HI = 5.0, 5.5
 GOAL_MIN_SEC, GOAL_MAX_SEC = 600, 5000
 PARAMS_PATH = Path(__file__).resolve().parent / "b2_params.json"
+NOTES_PATH = Path(__file__).resolve().parent / "stratum_notes.json"
 REQUIRED_COLS = ["start_time", "end_time", "distance_km", "duration_sec", "avg_hr", "t5_sec"]
+STOP_COL = "stop_sec"          # 선택 열(초): 세션 안 정지 시간. docs/demo_stratum_note_spec.md 5절
 EXAMPLE_CMD = "python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00"
 
 
@@ -102,7 +106,7 @@ def load_sessions(path, now=None):
     if not data:
         raise InputProblem("데이터 행이 없습니다(헤더만 있거나 모두 빈 줄).", "달리기 한 번당 한 줄씩 기록을 추가하세요(열: %s)." % ", ".join(REQUIRED_COLS))
 
-    sessions, bad_time, bad_num, bad_order = [], [], [], []
+    sessions, bad_time, bad_num, bad_order, bad_stop = [], [], [], [], []
     for line, r in data:
         try:
             st, en = parse_time(r["start_time"]), parse_time(r["end_time"])
@@ -120,15 +124,25 @@ def load_sessions(path, now=None):
         except (ValueError, TypeError):
             bad_num.append(line)
             continue
+        stop_s = (r.get(STOP_COL) or "").strip() if STOP_COL in fields else ""
+        try:
+            stop = float(stop_s) if stop_s else None
+            if stop is not None and (not math.isfinite(stop) or stop < 0):
+                raise ValueError("bad stop")
+        except (ValueError, TypeError):
+            bad_stop.append(line)
+            continue
         if en < st:
             bad_order.append(line)
             continue
-        sessions.append({"start": st, "end": en, "km": km, "t5": t5})
+        sessions.append({"start": st, "end": en, "km": km, "t5": t5, "stop": stop})
     if bad_time:
         raise InputProblem("%s의 start_time 또는 end_time 형식을 읽을 수 없습니다." % _line_list(bad_time),
                            "ISO 일시(예: 2025-03-03T07:00:00) 또는 에포크 초(숫자)로 고치세요. 엑셀이 바꾼 날짜 형식(예: 3/3/2025 7:00)은 텍스트로 다시 저장해야 합니다.")
     if bad_num:
         raise InputProblem("%s의 distance_km 또는 t5_sec가 숫자가 아닙니다." % _line_list(bad_num), "km와 초를 숫자로 입력하세요(t5_sec는 5km 기록이 아니면 비워 둡니다).")
+    if bad_stop:
+        raise InputProblem("%s의 stop_sec가 0 이상의 숫자가 아닙니다." % _line_list(bad_stop), "정지 시간을 0 이상의 초 단위 숫자로 입력하거나(선택 열) 비워 두세요.")
     if bad_order:
         raise InputProblem("%s의 end_time이 start_time보다 이릅니다." % _line_list(bad_order), "시작·종료 시각이 바뀌지 않았는지 확인하세요.")
 
@@ -239,7 +253,8 @@ def assess(sessions, asof, params):
     if len(past) == 1:
         m = ref
     y_hat = predict_change(ref, m, params)
-    res.update(ref=ref, m=m, y_hat=y_hat, pred=ref + y_hat, a_term=params["a"], b_coef=params["b"], b_term=params["b"] * (ref - m),
+    res.update(n_past=len(past), x=ref - m, days_ref=(asof - ref_s["end"]) / DAY, ref_stop=ref_s.get("stop"),
+               ref=ref, m=m, y_hat=y_hat, pred=ref + y_hat, a_term=params["a"], b_coef=params["b"], b_term=params["b"] * (ref - m),
                tot_int=int(round(y_hat)), cov=params["test_coverage_cold"],
                lo=ref + y_hat + params["resid_q10"], hi=ref + y_hat + params["resid_q90"])
     return res
@@ -326,6 +341,63 @@ def format_goal(res, goal_sec, params):
     return text, info
 
 
+def load_notes(path=NOTES_PATH):
+    """demo/stratum_notes.json(docs/b2_failure_5km.md의 train 폴드 밖 행에서 make_stratum_notes.py가 만듦)."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))["strata"]
+
+
+# 층별 판정 조건(예측 시점에 관측 가능한 값만)과 문구의 <조건>. 키 = (차원, 문서의 층 이름). docs/demo_stratum_note_spec.md 3·4절
+STRATUM_RULES = {
+    ("a", "1개(x = 0)"): (lambda r: r["n_past"] == 1, "과거 유효 5km가 직전 기록 1개뿐"),
+    ("a", "2~4개"): (lambda r: 2 <= r["n_past"] <= 4, "과거 유효 5km가 2~4개뿐"),
+    ("a", "5개 이상"): (lambda r: r["n_past"] >= 5, "과거 유효 5km가 5개 이상"),
+    ("b", "0초"): (lambda r: r["x"] == 0, "직전 기록이 평소와 같음"),
+    ("b", "0초 초과 ~ 30초"): (lambda r: 0 < abs(r["x"]) <= 30, "직전 기록과 평소의 차이가 30초 이하"),
+    ("b", "30초 초과 ~ 120초"): (lambda r: 30 < abs(r["x"]) <= 120, "직전 기록과 평소의 차이가 30초 넘고 2분 이하"),
+    ("b", "120초 초과"): (lambda r: abs(r["x"]) > 120, "직전 기록이 평소와 2분 넘게 차이"),
+    ("c", "0~7일"): (lambda r: r["days_ref"] < 7, "직전 기록이 7일 이내"),
+    ("c", "7~14일"): (lambda r: 7 <= r["days_ref"] < 14, "직전 기록이 7~14일 전"),
+    ("c", "14~28일"): (lambda r: r["days_ref"] >= 14, "직전 기록이 14일 이상 전"),
+    ("d", "4~7회"): (lambda r: r["n_runs"] <= 7, "직전 28일 달리기가 4~7회"),
+    ("d", "8~15회"): (lambda r: 8 <= r["n_runs"] <= 15, "직전 28일 달리기가 8~15회"),
+    ("d", "16회 이상"): (lambda r: r["n_runs"] >= 16, "직전 28일 달리기가 16회 이상"),
+    ("e", "300초 초과"): (lambda r: r["ref_stop"] is not None and r["ref_stop"] > 300, "직전 기록 세션에 5분 넘는 정지가 있음"),
+}
+NOTE_FMT = "※ 이 조건(%s)에서는 학습 자료 교차검증에서 명목 80%% 범위의 실제 포함률이 %.1f%%였습니다. 범위를 더 넓게 보셔야 합니다."
+WIDTH_LINE = "※ 위 안내는 범위 폭을 바꾸지 않습니다(명목 80% 범위는 모든 조건에서 같은 폭입니다)."
+NO_STOP_LINE = "※ 정지 시간 정보가 없어 이 조건은 확인하지 않았습니다"
+
+
+def stratum_lines(res, notes=None):
+    """해당하는 층의 안내 줄 전부(+ 범위 폭 불변 줄, + 정지 시간 정보 없음 줄). 반환 (줄 목록, 해당 층 목록). 범위 자체는 바꾸지 않는다."""
+    if not res["eligible"]:
+        return [], []
+    notes = load_notes() if notes is None else notes
+    matched = [s for s in notes if STRATUM_RULES[(s["dim"], s["label"])][0](res)]
+    lines = [NOTE_FMT % (STRATUM_RULES[(s["dim"], s["label"])][1], s["cov"]) for s in matched]
+    if lines:
+        lines.append(WIDTH_LINE)
+    if res["ref_stop"] is None and any(s["dim"] == "e" for s in notes):
+        lines.append(NO_STOP_LINE)
+    return lines, matched
+
+
+def check_stratum_lines(lines, matched, res):
+    """안내 줄의 문구와 숫자가 JSON 값과 맞는지 검사한다. 불일치 시 ValueError."""
+    if not res["eligible"]:
+        if lines:
+            raise ValueError("자격 미달인데 층 안내가 있음")
+        return True
+    expect = [NOTE_FMT % (STRATUM_RULES[(s["dim"], s["label"])][1], s["cov"]) for s in matched]
+    if matched:
+        expect.append(WIDTH_LINE)
+    if res["ref_stop"] is None and NO_STOP_LINE in lines:
+        expect.append(NO_STOP_LINE)
+    if lines != expect:
+        raise ValueError("층 안내 문구가 JSON 값과 다름")
+    return True
+
+
 # 템플릿에 고정된 숫자(다음 7일, 5km, 80%, 지난 4주, 28일, 4회, 5,000초, 5.0~5.5km)와 파일 이름 속 5. 계산값이 아니므로 따로 허용한다.
 TEMPLATE_INTS = {"4", "5", "7", "28", "80", "000"}
 TEMPLATE_DECS = {"5.0", "5.5"}
@@ -402,6 +474,9 @@ def run(csv_path, asof, params=None, goal=None, now=None):
     main_text = format_report(res)
     check_numbers(main_text, res)
     parts = ["※ " + n for n in notices + res["notices"]] + [main_text]
+    note_lines, matched = stratum_lines(res)
+    check_stratum_lines(note_lines, matched, res)
+    parts += note_lines
     if goal_s is not None:
         if res["eligible"]:
             g_text, info = format_goal(res, goal_s, params)

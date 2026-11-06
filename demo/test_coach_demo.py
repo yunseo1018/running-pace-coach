@@ -262,13 +262,26 @@ def test_only_observable_inputs_are_used_records_after_asof_do_not_change_predic
     assert len(r1["notices"]) == 1 and "기준 시점 이후에 끝난 기록 2개" in r1["notices"][0]
 
 
+def _rows_clean():
+    """층 안내가 없는 기본 기록: 달리기 6회, 유효 5km 5개(평소 1500초, 직전 1500초), 정지 시간 열 포함."""
+    runs = [(ASOF - d * cd.DAY - 1800, ASOF - d * cd.DAY, 3.0, None, 0) for d in (1, 5, 9)]
+    fives = [(ASOF - d * cd.DAY - 1800, ASOF - d * cd.DAY, 5.2, 1500.0, 40) for d in (3, 8, 12, 40, 50)]
+    return runs + fives
+
+
+def _csv_stop(tmp, rows, name="st.csv"):
+    """rows: (start, end, km, t5 또는 None, stop 또는 None) -> stop_sec 열이 있는 CSV."""
+    lines = [HEADER + ",stop_sec"] + ["%s,%s,%s,1500,150,%s,%s" % (s_, e, km, "" if t5 is None else t5, "" if st is None else st) for s_, e, km, t5, st in rows]
+    return _write(tmp, name, "\n".join(lines) + "\n")
+
+
 def test_run_prints_notices_before_prediction_and_no_notice_when_clean():
     with tempfile.TemporaryDirectory() as tmp:
-        path = _csv(tmp, _rows_ok())
+        path = _csv_stop(tmp, _rows_clean())
         _res, clean = cd.run(path, str(ASOF), P, now=NOW)
-        assert "※" not in clean and clean.startswith("다음 7일 안 5km 예상 기록")
-        rows = _rows_ok()
-        _res, noisy = cd.run(_csv(tmp, rows + [rows[0]], "dup.csv"), str(ASOF), P, now=NOW)
+        assert "※" not in clean and clean.startswith("다음 7일 안 5km 예상 기록")       # 안내 줄이 하나도 없다
+        rows = _rows_clean()
+        _res, noisy = cd.run(_csv_stop(tmp, rows + [rows[0]], "dup.csv"), str(ASOF), P, now=NOW)
         assert noisy.startswith("※ ") and noisy.endswith(clean)           # 안내만 앞에 붙고 예측 문구는 같다
 
 
@@ -384,6 +397,139 @@ def test_goal_numbers_come_from_prediction_not_future_values():
     t0, _ = cd.format_goal(cd.assess(base, ASOF, P), 1400, P)
     t1, _ = cd.format_goal(cd.assess(base + later, ASOF, P), 1400, P)
     assert t0 == t1
+
+
+# ---------------------------------------------------------------- 조건별 범위 안내 (docs/demo_stratum_note_spec.md)
+def _sess_x(past_t5, ref_t5=1500.0, ref_stop=None, n_other_runs=3):
+    """직전 기록(ref_t5, 2일 전)과 과거 5km(past_t5 목록, 40일 이상 전)로 만든 세션. 과거 개수 = len(past_t5) + 1."""
+    sess = [S(d) for d in (1, 5, 9)][:n_other_runs]
+    ref = S(2, 5.2, ref_t5)
+    ref["stop"] = ref_stop
+    return sess + [ref] + [S(40 + 10 * i, 5.2, t) for i, t in enumerate(past_t5)]
+
+
+def _notes():
+    return cd.load_notes()
+
+
+def test_notes_json_matches_doc_train_rows_and_selection_rule():
+    import make_stratum_notes as mk
+    rows = mk.read_train_rows()
+    assert len(rows) == 16
+    sel = mk.select(rows)
+    notes = _notes()
+    assert [(n["dim"], n["label"]) for n in notes] == mk.SPEC_STRATA == [(r["dim"], r["label"]) for r in sel]
+    for n, r in zip(notes, sel):
+        assert (n["cov"], n["ci_lo"], n["ci_hi"], n["n"], n["users"]) == (r["cov"], r["ci_lo"], r["ci_hi"], r["n"], r["users"])
+        assert r["n"] >= 30 and r["ci_hi"] < 80.0
+    assert [n["cov"] for n in notes] == [70.6, 73.1, 67.8, 39.1]
+    assert all(not (r["n"] >= 30 and r["ci_hi"] < 80.0) for r in rows if r not in sel)      # 선정되지 않은 층은 규칙을 만족하지 않는다
+    doc = mk.DOC.read_text(encoding="utf-8")
+    for n in notes:                                         # 문서에 같은 포함률 [CI]가 train 폴드 밖 행으로 실제 있음
+        assert ("| train 폴드 밖 | %s |" % n["label"]) in doc and ("%.1f%% [%.1f%%, %.1f%%]" % (n["cov"], n["ci_lo"], n["ci_hi"])) in doc
+
+
+def _lines(sess):
+    r = cd.assess(sess, ASOF, P)
+    return r, cd.stratum_lines(r, _notes())
+
+
+def test_stratum_a_boundaries():
+    for n_other, expect in [(0, "과거 유효 5km가 직전 기록 1개뿐"), (1, "과거 유효 5km가 2~4개뿐"), (3, "과거 유효 5km가 2~4개뿐"), (4, None)]:
+        r, (lines, matched) = _lines(_sess_x([1500.0] * n_other, ref_stop=0))
+        assert r["n_past"] == n_other + 1
+        tag = [l for l in lines if "과거 유효 5km" in l]
+        if expect:
+            assert len(tag) == 1 and ("(%s)" % expect) in tag[0], (n_other, lines)
+        else:
+            assert tag == [] and lines == [], (n_other, lines)                    # 5개 이상이면 안내 없음
+
+
+def test_stratum_b_boundary_120_seconds():
+    r, (lines, _m) = _lines(_sess_x([1380.0, 1380.0], ref_stop=0))               # 중앙값 1380 -> x = 120.0 (120 초과 아님)
+    assert r["x"] == 120.0 and not any("2분 넘게" in l for l in lines)
+    r, (lines, _m) = _lines(_sess_x([1379.0, 1379.0], ref_stop=0))               # x = 121
+    assert r["x"] == 121.0 and any("직전 기록이 평소와 2분 넘게 차이" in l and "67.8%" in l for l in lines)
+    r, (lines, _m) = _lines(_sess_x([1621.0, 1621.0], ref_stop=0))               # 음수 방향도 절대값 121
+    assert r["x"] == -121.0 and any("2분 넘게" in l for l in lines)
+
+
+def test_stratum_e_boundary_and_missing_stop_info():
+    ok = [1500.0] * 4
+    r, (lines, _m) = _lines(_sess_x(ok, ref_stop=300))
+    assert lines == []                                                             # 정확히 300초는 초과 아님
+    r, (lines, _m) = _lines(_sess_x(ok, ref_stop=300.5))
+    assert len(lines) == 2 and "직전 기록 세션에 5분 넘는 정지가 있음" in lines[0] and "39.1%" in lines[0] and lines[1] == cd.WIDTH_LINE
+    r, (lines, _m) = _lines(_sess_x(ok, ref_stop=None))                           # 정보 없음: 안내 줄 없이 확인 불가 문구만
+    assert lines == [cd.NO_STOP_LINE] and "정지 시간 정보가 없어 이 조건은 확인하지 않았습니다" in lines[0]
+    assert not any("5분 넘는" in l for l in lines)
+
+
+def test_multiple_strata_show_all_lines_in_order_and_width_line_once():
+    r, (lines, matched) = _lines(_sess_x([1000.0, 1000.0], ref_stop=400))        # 과거 3개, x = 500, 정지 400
+    assert [m["dim"] for m in matched] == ["a", "b", "e"]
+    assert len(lines) == 4
+    assert "2~4개" in lines[0] and "73.1%" in lines[0] and "2분 넘게" in lines[1] and "67.8%" in lines[1] and "5분 넘는" in lines[2] and "39.1%" in lines[2]
+    assert lines[3] == cd.WIDTH_LINE and sum(1 for l in lines if l == cd.WIDTH_LINE) == 1
+    assert cd.check_stratum_lines(lines, matched, r)
+    try:
+        cd.check_stratum_lines([l.replace("73.1%", "73.2%") for l in lines], matched, r)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("문구 불일치를 잡아야 함")
+
+
+def test_stratum_notes_do_not_change_prediction_or_range():
+    r0 = cd.assess(_sess_x([1500.0] * 4, ref_stop=0), ASOF, P)                    # 안내 없음
+    r1 = cd.assess(_sess_x([1500.0] * 4, ref_stop=900), ASOF, P)                  # 정지 안내만 다름
+    assert cd.stratum_lines(r0, _notes())[0] == [] and cd.stratum_lines(r1, _notes())[0] != []
+    assert (r0["pred"], r0["lo"], r0["hi"], r0["y_hat"]) == (r1["pred"], r1["lo"], r1["hi"], r1["y_hat"])
+    assert r1["hi"] - r1["lo"] == P["resid_q90"] - P["resid_q10"]
+    assert abs(r1["lo"] - (r1["pred"] + P["resid_q10"])) < 1e-9 and abs(r1["hi"] - (r1["pred"] + P["resid_q90"])) < 1e-9
+    real = cd.load_params()
+    assert real["a"] == -15.287228077141389 and real["resid_q10"] == -202.11038214375517 and real["resid_q90"] == 277.9097030360434
+
+
+def test_stop_sec_column_is_optional_and_validated():
+    with tempfile.TemporaryDirectory() as tmp:
+        _r, text = cd.run(_csv(tmp, _rows_ok()), str(ASOF), P, now=NOW)         # 열 없음: 기존 CSV 그대로 동작
+        assert cd.NO_STOP_LINE in text and text.index(cd.NO_STOP_LINE) > text.index("다음 7일 안 5km 예상 기록")
+        for bad in ["abc", "-5"]:
+            rows = _rows_clean()
+            p = _csv_stop(tmp, rows[:-1] + [rows[-1][:4] + (bad,)], "bad.csv")
+            e = _problem(cd.run, p, str(ASOF), P, now=NOW)
+            assert "stop_sec" in e.reason and "0 이상" in e.reason
+        _r, with_blank = cd.run(_csv_stop(tmp, [r[:4] + (None,) for r in _rows_clean()], "blank.csv"), str(ASOF), P, now=NOW)
+        assert with_blank.endswith(cd.NO_STOP_LINE)                              # 열은 있으나 기준 기록의 값이 비어 있음
+
+
+def test_notes_come_after_prediction_before_goal_and_goal_block_unchanged():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _csv_stop(tmp, [r[:4] + (900,) if r[3] else r for r in _rows_clean()])
+        _r, plain = cd.run(path, str(ASOF), P, now=NOW)
+        _r, goal = cd.run(path, str(ASOF), P, goal="24:00", now=NOW)
+        assert plain.index("이 예측은 원인 분석이 아니며") < plain.index("※ 이 조건") and plain.endswith(cd.WIDTH_LINE)
+        assert goal.startswith(plain + "\n") and "목표 비교(목표 24:00)" in goal and goal.index("※ 이 조건") < goal.index("목표 비교(")
+
+
+def test_example_outputs_match_live_runs_and_cover_each_stratum():
+    import make_examples as mx
+    ex = Path(mx.OUT)
+    seen = {}
+    for csv_name, goal, out_name in mx.OUTPUTS:
+        argv = [str(ex / csv_name), "--asof", mx.ASOF_TEXT] + (["--goal", goal] if goal else [])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert cd.main(argv) == 0
+        assert (ex / out_name).read_text(encoding="utf-8") == buf.getvalue(), out_name
+        seen[out_name] = buf.getvalue()
+    keys = {"ex5_past1.out.txt": "직전 기록 1개뿐", "ex6_past3.out.txt": "2~4개뿐", "ex7_far_from_usual.out.txt": "2분 넘게", "ex8_long_stop.out.txt": "5분 넘는 정지"}
+    for name, frag in keys.items():
+        assert frag in seen[name] and cd.WIDTH_LINE in seen[name], name
+    assert "※" not in seen["ex9_no_note.out.txt"]                                # 안내 줄이 하나도 없다
+    assert "※ 이 조건" in seen["ex1_steady.out.txt"] and cd.NO_STOP_LINE in seen["ex1_steady.out.txt"]
+    assert "※ 이 조건" in seen["ex10_multi.out.txt"] and seen["ex10_multi.out.txt"].count("※ 이 조건") == 3
 
 
 if __name__ == "__main__":

@@ -55,7 +55,10 @@ n_pers = re.search(r"평가 기준 시점 (\d+)개, 사용자 (\d+)명", fin[fin
 ex = [("ex1_steady", "① 꾸준히 달린 사람", None), ("ex2_slower_last", "② 직전 기록이 평소보다 느렸던 사람", None), ("ex3_no_5km", "③ 자격 미달(5km 기록 없음)", None),
       ("ex4_few_runs", "④ 자격 미달(달리기 2회, 5km 기록이 5.0~5.5km 범위 밖)", None),
       ("ex1_steady", "⑤ 목표 비교: 목표 20:00 → 명목 범위보다 빠름", "20:00"), ("ex1_steady", "⑥ 목표 비교: 목표 24:00 → 명목 범위 안", "24:00"),
-      ("ex1_steady", "⑦ 목표 비교: 목표 30:00 → 명목 범위보다 느림", "30:00")]
+      ("ex1_steady", "⑦ 목표 비교: 목표 30:00 → 명목 범위보다 느림", "30:00"),
+      ("ex5_past1", "⑧ 조건별 안내: 과거 유효 5km 1개", None), ("ex6_past3", "⑨ 조건별 안내: 과거 유효 5km 2~4개", None),
+      ("ex7_far_from_usual", "⑩ 조건별 안내: 직전 기록이 평소와 2분 넘게 차이", None), ("ex8_long_stop", "⑪ 조건별 안내: 직전 기록 세션 정지 300초 초과", None),
+      ("ex10_multi", "⑫ 조건별 안내: 여러 층에 동시에 해당", None), ("ex9_no_note", "⑬ 조건별 안내 없음(과거 5km 5개, 평소와 차이 120초 이하, 정지 300초 이하)", None)]
 demo_blocks = []
 for f, title, goal in ex:
     cmd = [sys.executable, "-I", "demo/coach_demo.py", f"demo/examples/{f}.csv", "--asof", "2025-03-03T00:00:00"] + (["--goal", goal] if goal else [])
@@ -106,6 +109,7 @@ A("python demo/coach_demo.py demo/examples/ex2_slower_last.csv --asof 2025-03-03
 A("python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00 --goal 24:00   # 목표 비교(예측 범위와 목표를 비교)")
 A(f"python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, {n_tests}개)")
 A("python demo/make_examples.py            # 합성 예시 CSV 재생성(seed 고정)")
+A("python demo/make_stratum_notes.py       # stratum_notes.json 재생성(docs/b2_failure_5km.md의 train 폴드 밖 행만 읽음)")
 A("python demo/make_b2_params.py           # b2_params.json과 docs/demo_interval_check.md 재생성(로컬 data/ 필요)")
 A("python demo/bench_demo.py               # docs/demo_performance.md 재생성")
 A("```")
@@ -121,6 +125,7 @@ for f, title, out, goal in demo_blocks:
     A("```")
     A("")
 A("- **입력·옵션 문제는 멈추지 않고 안내한다**: 파일 없음·비어 있음·열 없음, 날짜·시간 형식 오류, 미래 날짜(제외하고 안내), 같은 시각의 중복 기록(제외하고 안내), 자격 미달(무엇이 몇 개 부족한지), 5km 기록이 5.0~5.5km 범위 밖이거나 극단(T5 > 5,000초)이면 그 이전의 유효 기록을 쓰고 그 사실을 표시한다. 문제는 \"오류: 이유 / 해결: 방법\" 두 줄과 종료 코드 2로 알린다. 예측 시점에 관측 가능한 입력만 쓰고 미래 값으로 거르는 규칙은 없다.")
+A("- **조건별 범위 안내**(사양 [`docs/demo_stratum_note_spec.md`](docs/demo_stratum_note_spec.md)): 사후 분석 [`docs/b2_failure_5km.md`](docs/b2_failure_5km.md)의 **train 폴드 밖** 결과에서 명목 80% 범위 포함률의 95% CI 상한이 80% 미만인 4개 층(과거 유효 5km 1개, 2~4개, 직전 기록이 평소와 120초 넘게 차이, 직전 기록 세션 정지 300초 초과)에 해당하면 그 층의 포함률(교차검증 통계, test 숫자 아님)과 함께 \"범위를 더 넓게 보셔야 합니다\" 줄을 해당하는 대로 모두 보여 준다. **범위의 위치와 폭은 바꾸지 않는다**(B2 식·파라미터 불변). 정지 시간은 선택 CSV 열 `stop_sec`(초, 세션 안 속도 1km/h 미만 구간의 시간 합)에서 읽고, 열이 없으면 \"정지 시간 정보가 없어 이 조건은 확인하지 않았습니다\"를 표시한다. 여러 층 중 우연히 걸린 것이 있을 수 있고 상관이며 원인이 아니다.")
 A("- **`--goal mm:ss`**: 목표(10:00~83:20)를 명목 범위와 비교해 \"명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림\" 중 하나와 예측−목표 차이(초)를 보여 준다. 범위 안·밖은 달성 확률이나 달성 가능 여부를 뜻하지 않으며 훈련 처방을 제공하지 않는다. 목표를 넣지 않으면 출력은 기존과 같다.")
 A(f"- **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start {cov[0][3]}%({cov[0][1]}개), personalized {cov[1][3]}%({cov[1][1]}개). 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.")
 A(f"- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 {b2c[0]} ms, tracemalloc 최대 {b2c[3]}바이트, 파라미터 파일 {b2c[4]}바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).")
