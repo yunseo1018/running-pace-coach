@@ -22,7 +22,7 @@
 python demo/coach_demo.py demo/examples/ex2_slower_last.csv --asof 2025-03-03T00:00:00
 python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00 --goal 24:00   # 목표 비교(예측 범위와 목표를 비교)
 python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, 42개)
-python demo/test_import_apple_health.py # 애플 건강 가져오기 테스트(합성 XML·GPX, numpy/pandas 필요, 7개)
+python demo/test_import_apple_health.py # 애플 건강 가져오기 테스트(합성 XML·GPX, numpy/pandas 필요, 8개)
 python demo/make_examples.py            # 합성 예시 CSV 재생성(seed 고정)
 python demo/make_stratum_notes.py       # stratum_notes.json 재생성(docs/b2_failure_5km.md의 train 폴드 밖 행만 읽음)
 python demo/make_b2_params.py           # b2_params.json과 docs/demo_interval_check.md 재생성(로컬 data/ 필요)

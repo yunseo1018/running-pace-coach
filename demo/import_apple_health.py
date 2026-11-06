@@ -71,14 +71,13 @@ def parse_apple_time(text):
 
 
 def find_members(zf):
-    """(메인 XML 멤버 이름, {gpx 파일 이름: 멤버 이름})."""
-    main = None
-    for n in zf.namelist():
-        base = n.rsplit("/", 1)[-1]
-        if base in ("내보내기.xml", "export.xml"):
-            main = n
-    if main is None:
+    """(메인 XML 멤버 이름, {gpx 파일 이름: 멤버 이름}).
+    한국어 로케일 ZIP은 파일 이름이 UTF-8 표시 없이 저장되어 파이썬이 깨진 글자로 읽을 수 있으므로(실제 ZIP에서 확인) 이름 대신
+    '_cda가 아닌 XML 중 가장 큰 것'을 메인 XML로 쓴다(export.xml / 내보내기.xml 이름이면 그대로 맞는다)."""
+    xmls = [i for i in zf.infolist() if i.filename.lower().endswith(".xml") and "_cda" not in i.filename.rsplit("/", 1)[-1].lower()]
+    if not xmls:
         raise SystemExit("오류: ZIP 안에서 메인 XML(내보내기.xml 또는 export.xml)을 찾지 못했습니다.")
+    main = max(xmls, key=lambda i: i.file_size).filename
     gpx = {n.rsplit("/", 1)[-1]: n for n in zf.namelist() if n.lower().endswith(".gpx")}
     return main, gpx
 

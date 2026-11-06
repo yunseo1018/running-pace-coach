@@ -164,6 +164,14 @@ def test_generated_csv_works_with_demo_and_avg_hr_is_optional():
         assert cd.run(str(p_no), asof, cd.load_params())[1] == t_full and cd.run(str(p_blank), asof, cd.load_params())[1] == t_full
 
 
+def test_main_xml_is_found_even_when_korean_file_name_is_garbled():
+    with tempfile.TemporaryDirectory() as tmp:
+        garbled = "내보내기.xml".encode("utf-8").decode("cp437") + ".xml"           # 실제 ZIP에서 본 형태: UTF-8 이름이 cp437로 읽힌 글자
+        z = make_zip(tmp, [workout("2025-10-12 07:00:00 +0900", "2025-10-12 07:26:30 +0900", 5.2, "Apple Watch", "route_a.gpx")], {"route_a.gpx": gpx(60)}, xml_name=garbled)
+        code, _text, out = _run(tmp, z)
+        assert code == 0 and len(_read(out)) == 1
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
