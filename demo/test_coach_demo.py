@@ -96,7 +96,7 @@ def test_two_term_split_and_coverage_text():
     assert "기본 변화량 a(−15.0초)" in text and "b×(직전 − 평소)(−40.0초)" in text and "예상 변화 약 −55초" in text
     assert "테스트 포함률 73.9%(탐색 결과), 개인에게 80%를 보장하지 않음" in text and "명목 80% 범위 " in text
     assert "다음 7일 안에 5km 기록이 관측된 경우를 기준으로 한 예측입니다" in text
-    assert "50초 느렸던 만큼 다음 기록을 평소 쪽에 가깝게 예측했습니다(기록이 평소 주위에서 흔들리는 통계적 현상이며, 원인 효과가 아님)" in text and "때문에" not in text
+    assert "직전 기록이 평소보다 50초 느렸던 만큼 보정 항(−40.0초)이 평소 쪽(빠른 쪽)으로 움직였고" in text and "통계적 현상이며, 원인 효과가 아님" in text and "때문에" not in text
     assert "중앙값은 약 −15초였음(상관, 인과 아님)" in text
     assert "평균 변화량" not in text and "49c02f8" not in text and "최종 평가 결과(docs/final_results_5km.md)" in text
     # N과 보정 항 일치: 50초 느림 <-> 보정 -40.0 (= -0.8 x 50)
@@ -399,6 +399,40 @@ def test_goal_numbers_come_from_prediction_not_future_values():
     assert t0 == t1
 
 
+# ---------------------------------------------------------------- 방향 문장: 두 항과 최종 예측의 방향 (다섯 경우)
+def _trend_case(past_t5, ref_t5=1500.0):
+    r = cd.assess(_sess_x(past_t5, ref_t5, ref_stop=0), ASOF, P)
+    text = cd.format_report(r)
+    assert cd.check_numbers(text, r)
+    line = [l for l in text.split(chr(10)) if "통계적 현상이며, 원인 효과가 아님" in l]
+    assert len(line) == 1 and "때문에" not in line[0]
+    return r, line[0]
+
+
+def test_trend_sentence_five_cases_match_final_direction():
+    # P: a = -15.0, b = -0.8
+    r, l = _trend_case([1500.0])                                   # (가) x = 0
+    assert r["x"] == 0 and r["pred"] < r["ref"] and "보정 항은 없고" in l and "기본 변화량(−15.0초)만 반영" in l and "직전 기록보다 15초 빠릅니다" in l
+    r, l = _trend_case([1450.0, 1450.0])                           # (나) 직전이 평소보다 50초 느림
+    assert r["pred"] < r["ref"] and "50초 느렸던 만큼 보정 항(−40.0초)이 평소 쪽(빠른 쪽)" in l and "기본 변화량(−15.0초)도 같은 방향" in l and "직전 기록보다 55초 빠릅니다" in l
+    r, l = _trend_case([1510.0, 1510.0])                           # (다) x = -10: 보정 +8.0 < |a| 15.0
+    assert r["pred"] < r["ref"] and abs(r["b_term"]) < abs(r["a_term"]) and "평소보다 10초 빨랐던 만큼 평소 쪽으로 +8.0초 움직였지만" in l and "기본 변화량(−15.0초)이 더 커서" in l and "직전 기록보다 7초 빠릅니다" in l
+    r, l = _trend_case([1530.0, 1530.0])                           # (라) x = -30: 보정 +24.0 > |a|
+    assert r["pred"] > r["ref"] and abs(r["b_term"]) > abs(r["a_term"]) and "평소 쪽으로 +24.0초 움직였고 기본 변화량(−15.0초)보다 커서" in l and "직전 기록보다 9초 느립니다(평소 쪽)" in l
+    r, l = _trend_case([1518.75, 1518.75])                         # (마) 두 항이 상쇄 -> |예상 변화| < 0.5
+    assert abs(r["y_hat"]) < 0.5 and "거의 상쇄되어 최종 예측은 직전 기록과 거의 같습니다" in l and "빠릅니다" not in l and "느립니다" not in l
+
+
+def test_trend_sentence_direction_matches_prediction_for_many_x():
+    for m in [1300.0, 1450.0, 1499.0, 1500.0, 1501.0, 1510.0, 1518.0, 1518.75, 1519.0, 1530.0, 1600.0]:
+        r, l = _trend_case([m] if m == 1500.0 else [m, m])
+        d = r["pred"] - r["ref"]
+        word = "거의 같습니다" if (abs(r["y_hat"]) < 0.5 or r["tot_int"] == 0) else ("빠릅니다" if d < 0 else "느립니다")
+        assert word in l, (m, d, l)
+        assert ("빠릅니다" in l) == (word == "빠릅니다") and ("느립니다" in l) == (word == "느립니다")
+
+
+
 # ---------------------------------------------------------------- 조건별 범위 안내 (docs/demo_stratum_note_spec.md)
 def _sess_x(past_t5, ref_t5=1500.0, ref_stop=None, n_other_runs=3):
     """직전 기록(ref_t5, 2일 전)과 과거 5km(past_t5 목록, 40일 이상 전)로 만든 세션. 과거 개수 = len(past_t5) + 1."""
@@ -529,6 +563,8 @@ def test_example_outputs_match_live_runs_and_cover_each_stratum():
         assert frag in seen[name] and cd.WIDTH_LINE in seen[name], name
     assert "※" not in seen["ex9_no_note.out.txt"]                                # 안내 줄이 하나도 없다
     assert "※ 이 조건" in seen["ex1_steady.out.txt"] and cd.NO_STOP_LINE in seen["ex1_steady.out.txt"]
+    assert "평소 쪽으로 +5.5초 움직였지만" in seen["ex11_trend_smaller_a.out.txt"] and "직전 기록보다 10초 빠릅니다" in seen["ex11_trend_smaller_a.out.txt"]
+    assert "직전 기록보다" in seen["ex12_trend_larger_a.out.txt"] and "느립니다(평소 쪽)" in seen["ex12_trend_larger_a.out.txt"]
     assert "※ 이 조건" in seen["ex10_multi.out.txt"] and seen["ex10_multi.out.txt"].count("※ 이 조건") == 3
 
 

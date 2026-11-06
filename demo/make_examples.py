@@ -66,6 +66,20 @@ def write7(name, rows):
         w.writerows(rows)
 
 
+TREND_BASE = [["2025-02-10T07:00:00", "2025-02-10T07:20:00", 3.5, 1200, 148, ""],
+              ["2025-02-12T18:00:00", "2025-02-12T18:26:00", 5.2, 1560, 155, 1500.0],
+              ["2025-02-15T07:00:00", "2025-02-15T07:40:00", 6.0, 2400, 150, ""],
+              ["2025-02-20T07:00:00", "2025-02-20T07:25:30", 5.1, 1530, 157, 1495.0],
+              ["2025-02-26T18:00:00", "2025-02-26T18:26:30", 5.3, 1590, 156, 1488.0]]
+
+
+def trend_rows(last_t5):
+    """방향 문장 예시(난수 없음): 5km 기록 3개(2/12 5.2km 1500, 2/20 5.1km 1495, 마지막 2/26 5.3km last_t5) + 3.5km·6.0km 달리기 각 1회."""
+    rows = [list(r) for r in TREND_BASE]
+    rows[-1][5] = last_t5
+    return rows
+
+
 def main():
     rng = random.Random(42)
     # 1) 꾸준히 달린 사람: 평소 약 25분, 마지막 5km도 평소 수준
@@ -84,6 +98,10 @@ def main():
     write7("ex8_long_stop.csv", stop_rows([(3, 1500.0, 420)] + [(d, 1500.0, 40) for d in (10, 17, 24, 40)]))       # 직전 기록 세션 정지 420초
     write7("ex9_no_note.csv", stop_rows([(3, 1500.0, 40)] + [(d, 1500.0, 40) for d in (10, 17, 24, 40)]))          # 해당 층 없음
     write7("ex10_multi.csv", stop_rows([(3, 1800.0, 400), (12, 1500.0, 40), (21, 1500.0, 40)]))                 # 과거 3개 + 평소와 300초 차이 + 정지 400초
+    # 11) 방향 문장 (다): 직전 기록이 평소보다 7초 빠르고 보정 항(+5.5초)이 기본 변화량(−15.3초)보다 작음 -> 최종 예측은 직전보다 빠름. 난수 없음
+    write("ex11_trend_smaller_a.csv", trend_rows(1488.0))
+    # 12) 방향 문장 (라): 직전 기록이 평소보다 40초 빠름 -> 보정 항(+31.6초)이 기본 변화량보다 커서 최종 예측은 직전보다 느림(평소 쪽)
+    write("ex12_trend_larger_a.csv", trend_rows(1455.0))
     print("saved", sorted(p.name for p in OUT.glob("*.csv")))
     write_outputs()
 
@@ -94,7 +112,8 @@ OUTPUTS = [("ex1_steady.csv", None, "ex1_steady.out.txt"), ("ex2_slower_last.csv
            ("ex1_steady.csv", "20:00", "ex1_goal_faster.out.txt"), ("ex1_steady.csv", "24:00", "ex1_goal_inside.out.txt"), ("ex1_steady.csv", "30:00", "ex1_goal_slower.out.txt"),
            ("ex4_few_runs.csv", None, "ex4_few_runs.out.txt"),
            ("ex5_past1.csv", None, "ex5_past1.out.txt"), ("ex6_past3.csv", None, "ex6_past3.out.txt"), ("ex7_far_from_usual.csv", None, "ex7_far_from_usual.out.txt"),
-           ("ex8_long_stop.csv", None, "ex8_long_stop.out.txt"), ("ex9_no_note.csv", None, "ex9_no_note.out.txt"), ("ex10_multi.csv", None, "ex10_multi.out.txt")]
+           ("ex8_long_stop.csv", None, "ex8_long_stop.out.txt"), ("ex9_no_note.csv", None, "ex9_no_note.out.txt"), ("ex10_multi.csv", None, "ex10_multi.out.txt"),
+           ("ex11_trend_smaller_a.csv", None, "ex11_trend_smaller_a.out.txt"), ("ex12_trend_larger_a.csv", None, "ex12_trend_larger_a.out.txt")]
 
 
 def write_outputs():

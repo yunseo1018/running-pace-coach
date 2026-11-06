@@ -288,17 +288,36 @@ def cov_text(res):
     return "%.1f%%" % (100.0 * res["cov"])
 
 
+TREND_TAIL = "(기록이 평소 주위에서 흔들리는 통계적 현상이며, 원인 효과가 아님)"
+
+
+def trend_text(res):
+    """두 항(기본 변화량 a, 평소 대비 보정 b×x)의 방향과 최종 예측의 방향(직전 기록 대비)을 각각 말하는 문장.
+    (가) x = 0 / (나) 직전이 평소보다 느림 / (다) 직전이 평소보다 빠르고 |보정| < |a| / (라) 같은 경우에 |보정| > |a| / (마) |예상 변화| < 0.5초."""
+    ref_s, m_s = int(round(res["ref"])), int(round(res["m"]))
+    n = abs(ref_s - m_s)
+    a_t, b_t, tot = res["a_term"], res["b_term"], res["tot_int"]
+    t_abs = abs(tot)
+    b_txt, a_txt = "%s초" % signed1(b_t), "%s초" % signed1(a_t)
+    if abs(res["y_hat"]) < 0.5 or tot == 0:                                           # (마)
+        why = "직전 기록이 평소와 같아" if ref_s == m_s else "직전 기록이 평소보다 %d초 %s" % (n, "느렸고" if ref_s > m_s else "빨랐고")
+        return "%s 보정 항(%s)과 기본 변화량(%s)이 거의 상쇄되어 최종 예측은 직전 기록과 거의 같습니다. %s" % (why, b_txt, a_txt, TREND_TAIL)
+    final = "최종 예측은 직전 기록보다 %d초 %s" % (t_abs, "빠릅니다" if tot < 0 else "느립니다")
+    if ref_s == m_s:                                                                  # (가)
+        return "직전 기록이 평소와 같아 보정 항은 없고(%s), 기본 변화량(%s)만 반영해 %s. %s" % (b_txt, a_txt, final, TREND_TAIL)
+    if ref_s > m_s and b_t < 0 and a_t < 0:                                           # (나)
+        return "직전 기록이 평소보다 %d초 느렸던 만큼 보정 항(%s)이 평소 쪽(빠른 쪽)으로 움직였고, 기본 변화량(%s)도 같은 방향이라 %s. %s" % (n, b_txt, a_txt, final, TREND_TAIL)
+    if ref_s < m_s and b_t > 0 and a_t < 0:
+        if tot < 0:                                                                   # (다)
+            return "보정 항은 직전 기록이 평소보다 %d초 빨랐던 만큼 평소 쪽으로 %s 움직였지만, 기본 변화량(%s)이 더 커서 %s. %s" % (n, b_txt, a_txt, final, TREND_TAIL)
+        return "보정 항은 직전 기록이 평소보다 %d초 빨랐던 만큼 평소 쪽으로 %s 움직였고 기본 변화량(%s)보다 커서 %s(평소 쪽). %s" % (n, b_txt, a_txt, final, TREND_TAIL)   # (라)
+    return "보정 항(%s)과 기본 변화량(%s)을 더해 %s. %s" % (b_txt, a_txt, final, TREND_TAIL)        # 위 경우에 없는 부호 조합(현재 파라미터에서는 나오지 않음)
+
+
 def format_report(res):
     if not res["eligible"]:
         return "예측할 수 없습니다. 부족한 조건:\n" + "\n".join("- " + s for s in res["shortfalls"]) + "\n해결: " + res["fix"]
-    ref_s, m_s = int(round(res["ref"])), int(round(res["m"]))
-    n = abs(ref_s - m_s)
-    if ref_s > m_s:
-        trend = "직전 기록이 평소보다 %d초 느렸던 만큼 다음 기록을 평소 쪽에 가깝게 예측했습니다(기록이 평소 주위에서 흔들리는 통계적 현상이며, 원인 효과가 아님)." % n
-    elif ref_s < m_s:
-        trend = "직전 기록이 평소보다 %d초 빨랐던 만큼 다음 기록을 평소 쪽에 가깝게 예측했습니다(기록이 평소 주위에서 흔들리는 통계적 현상이며, 원인 효과가 아님)." % n
-    else:
-        trend = "직전 기록이 평소와 같아 평소 쪽으로 돌아오는 보정이 거의 없습니다."
+    trend = trend_text(res)
     return ("다음 7일 안 5km 예상 기록: %s / 명목 80%% 범위 %s ~ %s\n" % (mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"]))
             + "테스트 포함률 %s(탐색 결과), 개인에게 80%%를 보장하지 않음\n" % cov_text(res)
             + "다음 7일 안에 5km 기록이 관측된 경우를 기준으로 한 예측입니다\n"
@@ -443,6 +462,8 @@ def check_numbers(text, res):
     for k, frag in expect.items():
         if frag not in text:
             raise ValueError("문구에 계산값이 없음: " + k)
+    if trend_text(res) not in text:
+        raise ValueError("방향 문장이 계산값과 맞지 않음")
     if gap != 0 and (" %d초 " % abs(gap)) not in text:
         raise ValueError("직전-평소 차이(초)가 문구에 없음")
     return True

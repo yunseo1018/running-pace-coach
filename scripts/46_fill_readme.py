@@ -58,7 +58,8 @@ ex = [("ex1_steady", "① 꾸준히 달린 사람", None), ("ex2_slower_last", "
       ("ex1_steady", "⑦ 목표 비교: 목표 30:00 → 명목 범위보다 느림", "30:00"),
       ("ex5_past1", "⑧ 조건별 안내: 과거 유효 5km 1개", None), ("ex6_past3", "⑨ 조건별 안내: 과거 유효 5km 2~4개", None),
       ("ex7_far_from_usual", "⑩ 조건별 안내: 직전 기록이 평소와 2분 넘게 차이", None), ("ex8_long_stop", "⑪ 조건별 안내: 직전 기록 세션 정지 300초 초과", None),
-      ("ex10_multi", "⑫ 조건별 안내: 여러 층에 동시에 해당", None), ("ex9_no_note", "⑬ 조건별 안내 없음(과거 5km 5개, 평소와 차이 120초 이하, 정지 300초 이하)", None)]
+      ("ex10_multi", "⑫ 조건별 안내: 여러 층에 동시에 해당", None), ("ex9_no_note", "⑬ 조건별 안내 없음(과거 5km 5개, 평소와 차이 120초 이하, 정지 300초 이하)", None),
+      ("ex11_trend_smaller_a", "⑭ 방향 문장 (다): 보정 항이 기본 변화량보다 작아 최종 예측이 직전보다 빠름", None), ("ex12_trend_larger_a", "⑮ 방향 문장 (라): 보정 항이 더 커서 최종 예측이 직전보다 느림(평소 쪽)", None)]
 demo_blocks = []
 for f, title, goal in ex:
     cmd = [sys.executable, "-I", "demo/coach_demo.py", f"demo/examples/{f}.csv", "--asof", "2025-03-03T00:00:00"] + (["--goal", goal] if goal else [])
