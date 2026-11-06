@@ -60,7 +60,8 @@ python demo/bench_demo.py               # docs/demo_performance.md 재생성
 
 ```text
 예측할 수 없습니다. 부족한 조건:
-- 직전 28일 안에 유효한 5km 기록이 없습니다(1회 이상 필요).
+- 직전 28일 안에 유효한 5km 기록이 없습니다(1회 이상 필요, 1회 부족).
+해결: 직전 28일 안의 달리기 기록(4회 이상)과 5.0~5.5km의 5km 기록 1회 이상(t5_sec 포함)을 CSV에 추가하거나, 기록이 충분한 기준 시점(--asof)을 지정하세요.
 ```
 
 - **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start 75.3%(352개), personalized 77.8%(442개). 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.

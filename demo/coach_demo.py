@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 정직한 기대치 코치 (시연 프로토타입, 명령줄)
-다음 7일 안 5km 기록을 '평균 회귀' 규칙(B2)으로 예측하고 80% 범위와 함께 보여준다.
-표준 라이브러리만 사용한다. 모델 학습 코드는 없다(a, b, 잔차 분위수는 demo/b2_params.json, 49c02f8 cold-start 최종 적합).
+다음 7일 안 5km 기록을 '평균 회귀' 규칙(B2)으로 예측하고 명목 80% 범위와 함께 보여준다.
+표준 라이브러리만 사용한다. 모델 학습 코드는 없다(a, b, 잔차 분위수는 demo/b2_params.json, 49c02f8 cold-start 최종 적합 + 보정 범위).
 
 입력 CSV 열: start_time, end_time, distance_km, duration_sec, avg_hr, t5_sec
   - start_time/end_time: 에포크 초 또는 ISO 일시(시간대 표기가 없으면 UTC로 두고 일관되게만 사용; 시각 기준 미확인)
@@ -10,14 +10,18 @@
 사용: python demo/coach_demo.py 세션.csv --asof 2025-01-06T00:00:00
 자격(주 분석 정의 그대로): 기준 시점 직전 28일 안에 끝난 달리기 4회 이상 + 그 창 안 유효 5km 기록 1회 이상(t5_sec <= 5000초, 5.0~5.5km).
 기준 기록 = 창 안 가장 늦게 시작한 유효 5km. 평소 기록 m = 기준 시점 전에 끝난 유효 5km의 중앙값(1회뿐이면 m = 기준 기록).
+가장 최근 5km 기록이 5.0~5.5km 범위 밖이거나 극단(T5 > 5,000초)이면 사전 선언 규칙대로 그 이전의 유효 기록을 기준 기록으로 쓰고 그 사실을 표시한다.
 예측: y_hat = a + b x (기준 기록 - m), 예상 기록 = 기준 기록 + y_hat.
-기준 시점까지 끝나지 않은 세션은 사용하지 않는다.
+기준 시점까지 끝나지 않은 세션은 사용하지 않는다. 입력 검사는 예측 시점에 관측 가능한 값만 쓴다(미래 값으로 거르는 규칙 없음).
+입력 문제(파일, 형식, 날짜)는 프로그램이 멈추지 않고 '오류: 이유 / 해결: 방법'을 한국어로 출력한다(종료 코드 2).
 """
 import argparse
 import csv
 import json
+import math
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import median
@@ -29,6 +33,20 @@ EXTREME_SEC = 5000.0
 KM_LO, KM_HI = 5.0, 5.5
 PARAMS_PATH = Path(__file__).resolve().parent / "b2_params.json"
 REQUIRED_COLS = ["start_time", "end_time", "distance_km", "duration_sec", "avg_hr", "t5_sec"]
+EXAMPLE_CMD = "python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00"
+
+
+class InputProblem(Exception):
+    """입력·옵션 문제: 이유(reason)와 해결 방법(fix)을 한국어로 보여 주기 위한 예외."""
+
+    def __init__(self, reason, fix):
+        super().__init__(reason)
+        self.reason = reason
+        self.fix = fix
+
+
+def problem_text(e):
+    return "오류: %s\n해결: %s" % (e.reason, e.fix)
 
 
 def load_params(path=PARAMS_PATH):
@@ -50,39 +68,157 @@ def parse_time(v):
         return dt.timestamp()
 
 
+def _line_list(lines):
+    shown = lines[:3]
+    more = "" if len(lines) <= 3 else " 등 %d곳" % len(lines)
+    return "·".join("%d" % n for n in shown) + "번째 줄" + more
+
+
+def load_sessions(path, now=None):
+    """CSV를 읽어 (세션 목록, 안내 목록)을 돌려준다. 입력 문제는 InputProblem. 미래 날짜 기록과 같은 시각의 중복 기록은 제외하고 안내한다."""
+    now = time.time() if now is None else now
+    p = Path(path)
+    if not p.exists():
+        raise InputProblem("입력 파일을 찾을 수 없습니다: %s" % path, "파일 경로를 확인하세요(작업 폴더 기준 상대 경로나 전체 경로). 예: " + EXAMPLE_CMD)
+    if p.is_dir():
+        raise InputProblem("입력 경로가 파일이 아니라 폴더입니다: %s" % path, "달리기 기록이 담긴 CSV 파일을 지정하세요.")
+    try:
+        if p.stat().st_size == 0:
+            raise InputProblem("입력 파일이 비어 있습니다(0바이트).", "헤더 줄과 달리기 기록이 담긴 CSV를 지정하세요(열: %s)." % ", ".join(REQUIRED_COLS))
+        with open(p, encoding="utf-8-sig", newline="") as f:
+            rd = csv.DictReader(f)
+            fields = rd.fieldnames or []
+            rows = list(rd)
+    except UnicodeDecodeError:
+        raise InputProblem("파일을 UTF-8로 읽을 수 없습니다.", "엑셀 등에서 'CSV UTF-8(쉼표로 분리)'로 다시 저장하세요.")
+    except (OSError, csv.Error) as e:
+        raise InputProblem("파일을 읽는 중 문제가 생겼습니다(%s)." % type(e).__name__, "파일이 다른 프로그램에서 열려 있지 않은지, 읽기 권한이 있는지 확인하세요.")
+    missing = [c for c in REQUIRED_COLS if c not in fields]
+    if missing:
+        raise InputProblem("필요한 열이 없습니다: " + ", ".join(missing), "첫 줄(헤더)에 열 이름 %s가 모두 있어야 합니다(쉼표로 구분, 엑셀의 세미콜론 저장 주의)." % ", ".join(REQUIRED_COLS))
+    data = [(i, r) for i, r in enumerate(rows, start=2) if any((v or "").strip() for v in r.values() if v is not None)]
+    if not data:
+        raise InputProblem("데이터 행이 없습니다(헤더만 있거나 모두 빈 줄).", "달리기 한 번당 한 줄씩 기록을 추가하세요(열: %s)." % ", ".join(REQUIRED_COLS))
+
+    sessions, bad_time, bad_num, bad_order = [], [], [], []
+    for line, r in data:
+        try:
+            st, en = parse_time(r["start_time"]), parse_time(r["end_time"])
+            if not (math.isfinite(st) and math.isfinite(en)):
+                raise ValueError("not finite")
+        except (ValueError, OverflowError, OSError, TypeError):
+            bad_time.append(line)
+            continue
+        try:
+            km = float(r["distance_km"])
+            t5s = (r["t5_sec"] or "").strip()
+            t5 = float(t5s) if t5s else None
+            if not math.isfinite(km) or (t5 is not None and not math.isfinite(t5)):
+                raise ValueError("not finite")
+        except (ValueError, TypeError):
+            bad_num.append(line)
+            continue
+        if en < st:
+            bad_order.append(line)
+            continue
+        sessions.append({"start": st, "end": en, "km": km, "t5": t5})
+    if bad_time:
+        raise InputProblem("%s의 start_time 또는 end_time 형식을 읽을 수 없습니다." % _line_list(bad_time),
+                           "ISO 일시(예: 2025-03-03T07:00:00) 또는 에포크 초(숫자)로 고치세요. 엑셀이 바꾼 날짜 형식(예: 3/3/2025 7:00)은 텍스트로 다시 저장해야 합니다.")
+    if bad_num:
+        raise InputProblem("%s의 distance_km 또는 t5_sec가 숫자가 아닙니다." % _line_list(bad_num), "km와 초를 숫자로 입력하세요(t5_sec는 5km 기록이 아니면 비워 둡니다).")
+    if bad_order:
+        raise InputProblem("%s의 end_time이 start_time보다 이릅니다." % _line_list(bad_order), "시작·종료 시각이 바뀌지 않았는지 확인하세요.")
+
+    notices = []
+    kept = [s for s in sessions if s["start"] <= now and s["end"] <= now]
+    n_future = len(sessions) - len(kept)
+    if n_future:
+        notices.append("현재 시각보다 미래 날짜의 기록 %d개는 아직 일어나지 않은 기록이라 사용하지 않았습니다. start_time·end_time의 연도와 날짜가 맞는지 확인하세요." % n_future)
+    seen, uniq = set(), []
+    for s in kept:
+        key = (s["start"], s["end"])
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(s)
+    n_dup = len(kept) - len(uniq)
+    if n_dup:
+        notices.append("시작·종료 시각이 같은 중복 기록 %d개는 먼저 나온 한 개만 남기고 제외했습니다. 중복 줄을 지우면 이 안내가 사라집니다." % n_dup)
+    return uniq, notices
+
+
 def read_sessions(path):
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        rd = csv.DictReader(f)
-        missing = [c for c in REQUIRED_COLS if c not in (rd.fieldnames or [])]
-        if missing:
-            raise ValueError("CSV에 없는 열: " + ", ".join(missing))
-        out = []
-        for r in rd:
-            t5 = (r["t5_sec"] or "").strip()
-            out.append({"start": parse_time(r["start_time"]), "end": parse_time(r["end_time"]),
-                        "km": float(r["distance_km"]), "t5": float(t5) if t5 else None})
-    return out
+    """세션 목록만 필요할 때(성능 측정 등). 입력 문제는 InputProblem."""
+    return load_sessions(path)[0]
+
+
+def parse_asof(asof, now):
+    try:
+        v = parse_time(asof)
+        if not math.isfinite(v):
+            raise ValueError("not finite")
+    except (ValueError, OverflowError, OSError, TypeError):
+        raise InputProblem("기준 시점(--asof)을 읽을 수 없습니다.", "ISO 일시(예: 2025-03-03T00:00:00) 또는 에포크 초(숫자)로 지정하세요.")
+    if v > now:
+        raise InputProblem("기준 시점이 현재 시각보다 미래입니다.", "오늘 또는 그 이전 시각으로 지정하세요(미래 기록은 관측할 수 없어 예측 시점으로 쓸 수 없습니다).")
+    return v
 
 
 def is_valid_5km(s):
     return s["t5"] is not None and KM_LO <= s["km"] <= KM_HI and 0 < s["t5"] <= EXTREME_SEC
 
 
+def _invalid_reasons(cands):
+    """유효하지 않은 5km 기록의 이유별 개수 설명(0개인 항목은 생략)."""
+    n_out = sum(1 for s in cands if not (KM_LO <= s["km"] <= KM_HI))
+    n_ext = sum(1 for s in cands if (KM_LO <= s["km"] <= KM_HI) and s["t5"] > EXTREME_SEC)
+    n_bad = len(cands) - n_out - n_ext
+    parts = []
+    if n_out:
+        parts.append("5.0~5.5km 범위 밖 %d개" % n_out)
+    if n_ext:
+        parts.append("극단(T5 > 5,000초) %d개" % n_ext)
+    if n_bad:
+        parts.append("T5 값 오류(0 이하) %d개" % n_bad)
+    return ", ".join(parts), {str(x) for x in (n_out, n_ext, n_bad) if x}
+
+
 def assess(sessions, asof, params):
-    """자격 판정과 예측 계산. 반환 dict(eligible, shortfalls, n_runs, 값들)."""
+    """자격 판정과 예측 계산. 반환 dict(eligible, shortfalls, n_runs, 값들). 기준 시점까지 끝난 기록만 쓴다."""
     t0 = asof - WIN_DAYS * DAY
     win = [s for s in sessions if t0 <= s["end"] < asof]
+    n_after = sum(1 for s in sessions if s["end"] >= asof)
     n_runs = len(win)
-    valid_win = sorted((s for s in win if is_valid_5km(s)), key=lambda s: s["start"])
-    short = []
+    cands = sorted((s for s in win if s["t5"] is not None), key=lambda s: s["start"])
+    valid_win = [s for s in cands if is_valid_5km(s)]
+    notices = []
+    if n_after:
+        notices.append("기준 시점 이후에 끝난 기록 %d개는 사용하지 않았습니다(예측 시점에 관측 가능한 기록만 사용)." % n_after)
+    short, ints = [], {str(n_runs)}
     if n_runs < MIN_RUNS:
-        short.append("직전 28일 안에 끝난 달리기가 %d회입니다(4회 이상 필요)." % n_runs)
+        short.append("직전 28일 안에 끝난 달리기가 %d회입니다(4회 이상 필요, %d회 부족)." % (n_runs, MIN_RUNS - n_runs))
+        ints.add(str(MIN_RUNS - n_runs))
     if not valid_win:
-        short.append("직전 28일 안에 유효한 5km 기록이 없습니다(1회 이상 필요).")
-    res = {"eligible": not short, "shortfalls": short, "n_runs": n_runs}
+        msg = "직전 28일 안에 유효한 5km 기록이 없습니다(1회 이상 필요, 1회 부족)."
+        if cands:
+            why, why_ints = _invalid_reasons(cands)
+            msg += " 5km 기록 %d개가 있으나 %s라 제외했습니다." % (len(cands), why)
+            ints |= why_ints | {str(len(cands))}
+        short.append(msg)
+        ints.add("1")
+    res = {"eligible": not short, "shortfalls": short, "n_runs": n_runs, "ints": ints, "notices": notices,
+           "fix": "직전 28일 안의 달리기 기록(4회 이상)과 5.0~5.5km의 5km 기록 1회 이상(t5_sec 포함)을 CSV에 추가하거나, 기록이 충분한 기준 시점(--asof)을 지정하세요."}
     if short:
         return res
-    ref = valid_win[-1]["t5"]
+    ref_s = valid_win[-1]
+    ref = ref_s["t5"]
+    skipped = [s for s in cands if not is_valid_5km(s) and s["start"] > ref_s["start"]]
+    if skipped:
+        why, _ = _invalid_reasons(skipped)
+        days = int(round((asof - ref_s["end"]) / DAY))
+        notices.append("가장 최근 5km 기록 %d개(%s)는 사전 선언 규칙(5.0~5.5km, T5 ≤ 5,000초)에 맞지 않아 쓰지 않고, 그 이전의 유효 기록(%d일 전)을 기준 기록으로 사용했습니다. 해당 줄의 distance_km·t5_sec를 확인하세요."
+                       % (len(skipped), why, days))
     past = [s["t5"] for s in sessions if s["end"] < asof and is_valid_5km(s)]
     m = median(past)
     if len(past) == 1:
@@ -124,7 +260,7 @@ def cov_text(res):
 
 def format_report(res):
     if not res["eligible"]:
-        return "예측할 수 없습니다. 부족한 조건:\n" + "\n".join("- " + s for s in res["shortfalls"])
+        return "예측할 수 없습니다. 부족한 조건:\n" + "\n".join("- " + s for s in res["shortfalls"]) + "\n해결: " + res["fix"]
     ref_s, m_s = int(round(res["ref"])), int(round(res["m"]))
     n = abs(ref_s - m_s)
     if ref_s > m_s:
@@ -146,8 +282,9 @@ def format_report(res):
             + "이 예측은 원인 분석이 아니며, 주마다 기록이 크게 흔들릴 수 있습니다.")
 
 
-# 템플릿에 고정된 숫자(다음 7일, 5km, 80%, 지난 4주, 28일, 4회)와 파일 이름 속 5. 계산값이 아니므로 따로 허용한다.
-TEMPLATE_INTS = {"4", "5", "7", "28", "80"}
+# 템플릿에 고정된 숫자(다음 7일, 5km, 80%, 지난 4주, 28일, 4회, 5,000초, 5.0~5.5km)와 파일 이름 속 5. 계산값이 아니므로 따로 허용한다.
+TEMPLATE_INTS = {"4", "5", "7", "28", "80", "000"}
+TEMPLATE_DECS = {"5.0", "5.5"}
 _TOKEN = re.compile(r"\d+:\d{2}|\d+\.\d+|\d+")
 
 
@@ -159,7 +296,7 @@ def check_numbers(text, res):
     """출력 문구 속 모든 숫자가 계산값(또는 템플릿 고정 숫자)과 일치하는지 검사한다. 불일치 시 ValueError."""
     tokens = _TOKEN.findall(text)
     if not res["eligible"]:
-        allowed = {str(res["n_runs"]), "1"} | TEMPLATE_INTS   # 1 = "5km 기록 1회 이상 필요"
+        allowed = set(res["ints"]) | TEMPLATE_INTS | TEMPLATE_DECS
         for t in tokens:
             if t not in allowed:
                 raise ValueError("계산값과 맞지 않는 숫자: " + t)
@@ -195,12 +332,17 @@ def check_numbers(text, res):
     return True
 
 
-def run(csv_path, asof, params=None):
+def run(csv_path, asof, params=None, now=None):
+    """입력 검사 → 예측 → 문구와 숫자 검사. 입력·옵션 문제는 InputProblem. 반환 (res, 출력 문구)."""
     params = params or load_params()
-    res = assess(read_sessions(csv_path), parse_time(asof), params)
-    text = format_report(res)
-    check_numbers(text, res)
-    return res, text
+    now = time.time() if now is None else now
+    asof_s = parse_asof(asof, now)
+    sessions, notices = load_sessions(csv_path, now)
+    res = assess(sessions, asof_s, params)
+    main_text = format_report(res)
+    check_numbers(main_text, res)
+    parts = ["※ " + n for n in notices + res["notices"]] + [main_text]
+    return res, "\n".join(parts)
 
 
 def main(argv=None):
@@ -210,8 +352,12 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         _res, text = run(a.csv, a.asof)
-    except (ValueError, OSError) as e:
-        print("오류:", e, file=sys.stderr)
+    except InputProblem as e:
+        print(problem_text(e))
+        return 2
+    except Exception as e:      # 예상하지 못한 문제도 추적 메시지 없이 안내한다
+        print("오류: 예상하지 못한 문제가 생겼습니다(%s)." % type(e).__name__)
+        print("해결: 입력 CSV의 열·값 형식을 확인하고, 계속되면 입력 파일과 명령을 함께 알려 주세요.")
         return 2
     print(text)
     return 0
