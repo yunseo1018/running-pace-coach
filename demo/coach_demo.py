@@ -18,8 +18,10 @@
 기준 시점까지 끝나지 않은 세션은 사용하지 않는다. 입력 검사는 예측 시점에 관측 가능한 값만 쓴다(미래 값으로 거르는 규칙 없음).
 입력·옵션 문제(파일, 형식, 날짜, --goal)는 프로그램이 멈추지 않고 '오류: 이유 / 해결: 방법'을 한국어로 출력한다(종료 코드 2).
 --goal mm:ss: 예측 범위와 목표를 비교해 '명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림' 중 하나를 보여준다(달성 확률·훈련 처방 아님).
+--feedback: 예측 뒤에 기준 시점 이후 7일 안 첫 5km 기록과 예측의 비교(범위 안·밖, 차이, 학습 자료 기준 비율)를 붙인다(처방·원인·실력 판정 아님; docs/demo_feedback_spec.md).
 """
 import argparse
+import bisect
 import csv
 import json
 import math
@@ -38,6 +40,7 @@ KM_LO, KM_HI = 5.0, 5.5
 GOAL_MIN_SEC, GOAL_MAX_SEC = 600, 5000
 PARAMS_PATH = Path(__file__).resolve().parent / "b2_params.json"
 NOTES_PATH = Path(__file__).resolve().parent / "stratum_notes.json"
+QUANT_PATH = Path(__file__).resolve().parent / "feedback_quantiles.json"
 REQUIRED_COLS = ["start_time", "end_time", "distance_km", "duration_sec", "t5_sec"]      # avg_hr는 선택 열(예측에 쓰지 않음)
 STOP_COL = "stop_sec"          # 선택 열(초): 세션 안 정지 시간. docs/demo_stratum_note_spec.md 5절
 EXAMPLE_CMD = "python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00"
@@ -485,7 +488,105 @@ def check_goal_numbers(text, info):
     return True
 
 
-def run(csv_path, asof, params=None, goal=None, now=None):
+# ---------------------------------------------------------------- 뛴 다음의 피드백 (docs/demo_feedback_spec.md)
+FB_HEAD = "뛴 다음의 피드백(기준 시점 이후 첫 5km 기록과 예측의 비교, 다음 7일 안에 5km가 관측된 경우에 한한 비교)"
+FB_FIXED = ["범위 안·밖은 실력 변화의 증거가 아니며, 한 번의 기록에는 일상적인 흔들림이 포함됩니다.",
+            "이 비교는 1회 관측이며 예측 성능의 근거가 아닙니다."]
+FB_BASIS = "(train 폴드 밖 B2 잔차 기준)"
+FB_POS = {"fast": "범위보다 빠름", "in": "범위 안", "slow": "범위보다 느림"}
+FB_TEMPLATE_INTS = {"1", "2", "5", "7", "80"}     # 1회 관측·1% 미만, B2, 5km, 다음 7일, 명목 80%
+
+
+def load_quantiles(path=QUANT_PATH):
+    q = json.loads(Path(path).read_text(encoding="utf-8"))
+    lv, v = q["levels_percent"], q["quantiles_sec"]
+    if len(lv) != len(v) or len(v) < 2 or any(v[i] > v[i + 1] for i in range(len(v) - 1)):
+        raise ValueError("분위수 표 형식 오류")
+    return q
+
+
+def residual_cdf(d, quantiles):
+    """잔차(실제 - 예측, 초)의 누적비율 F(d)(%): 분위수 표 사이 선형 보간. 표의 범위(1%~99% 분위수) 밖이면 None."""
+    lv, v = quantiles["levels_percent"], quantiles["quantiles_sec"]
+    if d < v[0] or d > v[-1]:
+        return None
+    i = min(bisect.bisect_right(v, d) - 1, len(v) - 2)
+    den = v[i + 1] - v[i]
+    frac = (d - v[i]) / den if den > 0 else 0.0
+    return lv[i] + frac * (lv[i + 1] - lv[i])
+
+
+def find_actual(sessions, asof, now):
+    """[asof, asof+7일)에 시작한 5.0~5.5km 달리기 중 t5_sec가 있는 가장 이른 기록. 극단(T5 > 5,000초)도 제외하지 않는다."""
+    end = asof + 7 * DAY
+    c5 = sorted((s for s in sessions if asof <= s["start"] < end and KM_LO <= s["km"] <= KM_HI), key=lambda s: s["start"])
+    actual, skipped = None, 0
+    for s in c5:
+        if s["t5"] is not None:
+            actual = s
+            break
+        skipped += 1
+    return {"actual": actual, "skipped": skipped, "n_cands": len(c5), "elapsed": end <= now}
+
+
+def format_feedback(res, fb, quantiles):
+    """피드백 블록. 반환 (문구, 점검용 정보)."""
+    info = {"ints": set(), "times": [], "dates": [], "share": None}
+    lines = [FB_HEAD]
+    if not res["eligible"]:
+        lines.append("예측이 없어 비교하지 않습니다(위 부족한 조건이 충족되면 비교할 수 있습니다).")
+    elif fb["actual"] is None:
+        lines.append("다음 7일 안에 비교할 5km 기록이 없습니다")
+        if not fb["elapsed"]:
+            lines.append("아직 7일이 지나지 않았습니다")
+        if fb["n_cands"]:
+            lines.append("5.0~5.5km 기록 %d개가 있으나 5km 시간(t5_sec)이 없어 비교하지 못했습니다" % fb["n_cands"])
+            info["ints"].add(str(fb["n_cands"]))
+    else:
+        act = fb["actual"]
+        act_s, pred_s, lo_s, hi_s = int(round(act["t5"])), int(round(res["pred"])), int(round(res["lo"])), int(round(res["hi"]))
+        d = act_s - pred_s
+        date = datetime.fromtimestamp(act["start"], tz=timezone.utc).strftime("%Y-%m-%d")
+        lines.append("실제 기록: %s 5km 시간 %s" % (date, mmss(act["t5"])))
+        if fb["skipped"]:
+            lines.append("이보다 먼저 뛴 5.0~5.5km 기록 %d개는 5km 시간(t5_sec)이 없어 건너뛰었습니다" % fb["skipped"])
+            info["ints"].add(str(fb["skipped"]))
+        lines.append("예측: %s / 명목 80%% 범위 %s ~ %s" % (mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"])))
+        lines.append("차이(실제 − 예측): %s초 (음수 = 예측보다 빠름)" % signed(d))
+        pos = "fast" if act_s < lo_s else ("slow" if act_s > hi_s else "in")
+        lines.append("명목 범위 대비 위치: " + FB_POS[pos])
+        info["times"] = [mmss(act["t5"]), mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"])]
+        info["dates"] = date.split("-")
+        info["ints"].add(str(abs(d)))
+        info["d"], info["pos"] = d, pos
+        if d == 0:
+            lines.append("예측과 같았습니다")
+        else:
+            f = residual_cdf(d, quantiles)
+            word, share = ("빨랐던", f) if d < 0 else ("느렸던", None if f is None else 100.0 - f)
+            if share is None:
+                share_txt = "1% 미만"
+            else:
+                share_txt = "%.1f%%" % share
+                info["share"] = share_txt.rstrip("%")
+            lines.append("학습 자료에서 예측보다 %d초 이상 %s 경우: %s %s" % (abs(d), word, share_txt, FB_BASIS))
+    lines += FB_FIXED
+    return "\n".join(lines), info
+
+
+def check_feedback_numbers(text, info):
+    """피드백 블록 속 숫자가 계산값(또는 템플릿 고정 숫자)과 일치하는지 검사한다. 불일치 시 ValueError."""
+    tokens = _TOKEN.findall(text)
+    if [t for t in tokens if ":" in t] != info["times"]:
+        raise ValueError("피드백의 시간 표기가 계산값과 다름")
+    allowed = set(info["ints"]) | set(info["dates"]) | FB_TEMPLATE_INTS | TEMPLATE_DECS | ({info["share"]} if info["share"] else set())
+    for t in tokens:
+        if ":" not in t and t not in allowed:
+            raise ValueError("피드백에 계산값과 맞지 않는 숫자: " + t)
+    return True
+
+
+def run(csv_path, asof, params=None, goal=None, now=None, feedback=False):
     """입력 검사 → 예측 → 문구와 숫자 검사. 입력·옵션 문제는 InputProblem. 반환 (res, 출력 문구)."""
     params = params or load_params()
     now = time.time() if now is None else now
@@ -508,6 +609,12 @@ def run(csv_path, asof, params=None, goal=None, now=None):
         else:
             parts.append("")
             parts.append("목표 비교는 예측이 가능할 때만 표시합니다. 위 부족한 조건을 채운 뒤 다시 실행하세요.")
+    if feedback:
+        fb_text, fb_info = format_feedback(res, find_actual(sessions, asof_s, now), load_quantiles())
+        check_feedback_numbers(fb_text, fb_info)
+        res["feedback"] = fb_info
+        parts.append("")
+        parts.append(fb_text)
     return res, "\n".join(parts)
 
 
@@ -516,9 +623,10 @@ def main(argv=None):
     ap.add_argument("csv", help="세션 CSV (열: " + ", ".join(REQUIRED_COLS) + ")")
     ap.add_argument("--asof", required=True, help="기준 시점(에포크 초 또는 ISO 일시)")
     ap.add_argument("--goal", default=None, help="목표 기록 mm:ss(10:00~83:20). 예측 범위와 비교해 '명목 범위보다 빠름/안/느림'을 보여 준다")
+    ap.add_argument("--feedback", action="store_true", help="예측 뒤에 기준 시점 이후 7일 안 첫 5km 기록과 예측을 비교한 피드백을 붙인다(처방·원인·실력 판정 아님)")
     a = ap.parse_args(argv)
     try:
-        _res, text = run(a.csv, a.asof, goal=a.goal)
+        _res, text = run(a.csv, a.asof, goal=a.goal, feedback=a.feedback)
     except InputProblem as e:
         print(problem_text(e))
         return 2

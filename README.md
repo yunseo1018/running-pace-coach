@@ -21,9 +21,11 @@
 ```bash
 python demo/coach_demo.py demo/examples/ex2_slower_last.csv --asof 2025-03-03T00:00:00
 python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00 --goal 24:00   # 목표 비교(예측 범위와 목표를 비교)
-python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, 42개)
+python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, 56개)
 python demo/test_import_apple_health.py # 애플 건강 가져오기 테스트(합성 XML·GPX, numpy/pandas 필요, 8개)
 python demo/make_examples.py            # 합성 예시 CSV 재생성(seed 고정)
+python demo/coach_demo.py demo/examples/ex13_feedback_inside.csv --asof 2025-03-03T00:00:00 --feedback   # 뛴 다음의 피드백(기준 시점 이후 7일 안 첫 5km와 예측 비교)
+python demo/make_feedback_quantiles.py  # feedback_quantiles.json 재생성(로컬 data/ 필요; 다시 실행해 git diff가 비면 재생성 확인)
 python demo/make_stratum_notes.py       # stratum_notes.json 재생성(docs/b2_failure_5km.md의 train 폴드 밖 행만 읽음)
 python demo/make_b2_params.py           # b2_params.json과 docs/demo_interval_check.md 재생성(로컬 data/ 필요)
 python demo/bench_demo.py               # docs/demo_performance.md 재생성
@@ -240,6 +242,33 @@ python demo/bench_demo.py               # docs/demo_performance.md 재생성
 ※ 정지 시간 정보가 없어 이 조건은 확인하지 않았습니다
 ```
 
+**⑯ 뛴 다음의 피드백: 실제 기록이 명목 범위 안** (`demo/examples/ex13_feedback_inside.csv`, `--feedback`, 기준 시점 2025-03-03, 예측 출력 뒤에 이어지는 피드백 블록)
+
+```text
+뛴 다음의 피드백(기준 시점 이후 첫 5km 기록과 예측의 비교, 다음 7일 안에 5km가 관측된 경우에 한한 비교)
+실제 기록: 2025-03-05 5km 시간 24:30
+예측: 24:45 / 명목 80% 범위 21:23 ~ 29:23
+차이(실제 − 예측): −15초 (음수 = 예측보다 빠름)
+명목 범위 대비 위치: 범위 안
+학습 자료에서 예측보다 15초 이상 빨랐던 경우: 46.0% (train 폴드 밖 B2 잔차 기준)
+범위 안·밖은 실력 변화의 증거가 아니며, 한 번의 기록에는 일상적인 흔들림이 포함됩니다.
+이 비교는 1회 관측이며 예측 성능의 근거가 아닙니다.
+```
+
+**⑰ 뛴 다음의 피드백: 실제 기록이 명목 범위보다 빠름(t5 없는 5km 1개 건너뜀)** (`demo/examples/ex14_feedback_faster.csv`, `--feedback`, 기준 시점 2025-03-03, 예측 출력 뒤에 이어지는 피드백 블록)
+
+```text
+뛴 다음의 피드백(기준 시점 이후 첫 5km 기록과 예측의 비교, 다음 7일 안에 5km가 관측된 경우에 한한 비교)
+실제 기록: 2025-03-06 5km 시간 20:30
+이보다 먼저 뛴 5.0~5.5km 기록 1개는 5km 시간(t5_sec)이 없어 건너뛰었습니다
+예측: 24:45 / 명목 80% 범위 21:23 ~ 29:23
+차이(실제 − 예측): −255초 (음수 = 예측보다 빠름)
+명목 범위 대비 위치: 범위보다 빠름
+학습 자료에서 예측보다 255초 이상 빨랐던 경우: 7.3% (train 폴드 밖 B2 잔차 기준)
+범위 안·밖은 실력 변화의 증거가 아니며, 한 번의 기록에는 일상적인 흔들림이 포함됩니다.
+이 비교는 1회 관측이며 예측 성능의 근거가 아닙니다.
+```
+
 - **입력·옵션 문제는 멈추지 않고 안내한다**: 파일 없음·비어 있음·열 없음, 날짜·시간 형식 오류, 미래 날짜(제외하고 안내), 같은 시각의 중복 기록(제외하고 안내), 자격 미달(무엇이 몇 개 부족한지), 5km 기록이 5.0~5.5km 범위 밖이거나 극단(T5 > 5,000초)이면 그 이전의 유효 기록을 쓰고 그 사실을 표시한다. 문제는 "오류: 이유 / 해결: 방법" 두 줄과 종료 코드 2로 알린다. 예측 시점에 관측 가능한 입력만 쓰고 미래 값으로 거르는 규칙은 없다.
 - **조건별 범위 안내**(사양 [`docs/demo_stratum_note_spec.md`](docs/demo_stratum_note_spec.md)): 사후 분석 [`docs/b2_failure_5km.md`](docs/b2_failure_5km.md)의 **train 폴드 밖** 결과에서 명목 80% 범위 포함률의 95% CI 상한이 80% 미만인 4개 층(과거 유효 5km 1개, 2~4개, 직전 기록이 평소와 120초 넘게 차이, 직전 기록 세션 정지 300초 초과)에 해당하면 그 층의 포함률(교차검증 통계, test 숫자 아님)과 함께 "범위를 더 넓게 보셔야 합니다" 줄을 해당하는 대로 모두 보여 준다. **범위의 위치와 폭은 바꾸지 않는다**(B2 식·파라미터 불변). 정지 시간은 선택 CSV 열 `stop_sec`(초, 세션 안 속도 1km/h 미만 구간의 시간 합)에서 읽고, 열이 없으면 "정지 시간 정보가 없어 이 조건은 확인하지 않았습니다"를 표시한다. 여러 층 중 우연히 걸린 것이 있을 수 있고 상관이며 원인이 아니다.
 - **애플워치 기록으로 해 보기**(내 건강 데이터는 저장소 밖에만 둔다; `my_runs/`·`*.mine.csv`·`apple_health_export/`·`*.zip`은 `.gitignore`에 있음):
@@ -247,6 +276,7 @@ python demo/bench_demo.py               # docs/demo_performance.md 재생성
   2. `python demo/import_apple_health.py --zip <저장소 밖 폴더>/my_runs/내보내기.zip --out <저장소 밖 폴더>/my_runs/runs.mine.csv` (경로가 있는 애플워치 기록만 `t5_sec`·`stop_sec`가 채워지고, 끝에 이유별 개수를 요약한다. `--out`이 저장소 안이면 멈춘다.)
   3. `python demo/coach_demo.py <저장소 밖 폴더>/my_runs/runs.mine.csv --asof 2025-10-20T00:00:00` (+ 선택 `--goal 24:00`)
   - 시각은 +0900 표기를 바꾸지 않고 현지 벽시계 그대로(시간대 표기 없이) 적으므로 `--asof`도 한국 시각으로 지정한다. `avg_hr`는 선택 열이고 예측에 쓰지 않는다. 좌표는 어디에도 저장·출력하지 않는다. t5는 연구 파이프라인 함수(`38_build_5km_dataset.compute_t5`)를 그대로 불러 쓰므로 numpy/pandas가 필요하다.
+- **`--feedback`**(사양 [`docs/demo_feedback_spec.md`](docs/demo_feedback_spec.md)): 기준 시점(`--asof`) 이후 7일 안에 시작한 5.0~5.5km 달리기 중 `t5_sec`가 있는 가장 이른 기록(극단도 제외하지 않음)을 예측과 비교해 실제 기록, 차이(실제 − 예측, 초), 명목 범위 대비 위치(범위보다 빠름 / 범위 안 / 범위보다 느림), 학습 자료에서 그만큼 이상 빨랐거나 느렸던 경우의 비율을 보여 준다. 비율은 범위 보정과 같은 train 폴드 밖 B2 잔차의 1%~99% 분위수 표([`demo/feedback_quantiles.json`](demo/feedback_quantiles.json), 집계값만 있음)를 선형 보간한 값이며 test 자료는 쓰지 않는다. 비교할 기록이 없거나 7일이 아직 지나지 않았으면 그렇게 알려 준다. 범위 안·밖은 실력 변화의 증거가 아니고 1회 관측이며 예측 성능의 근거가 아니다(고정 문장으로 항상 표시). 처방·원인 설명·실력 변화 판정·달성 확률은 하지 않는다. `--feedback`이 없으면 출력은 기존과 같다.
 - **`--goal mm:ss`**: 목표(10:00~83:20)를 명목 범위와 비교해 "명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림" 중 하나와 예측−목표 차이(초)를 보여 준다. 범위 안·밖은 달성 확률이나 달성 가능 여부를 뜻하지 않으며 훈련 처방을 제공하지 않는다. 목표를 넣지 않으면 출력은 기존과 같다.
 - **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start 75.3%(352개), personalized 77.8%(442개). 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.
 - **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 0.0241 ms, tracemalloc 최대 2,331바이트, 파라미터 파일 365바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).

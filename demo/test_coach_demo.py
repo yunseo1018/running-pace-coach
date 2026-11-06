@@ -581,6 +581,184 @@ def test_avg_hr_column_is_optional_and_does_not_change_prediction():
         assert cd.run(p_no, str(ASOF), P, now=NOW)[1] == t0 and cd.run(p_blank, str(ASOF), P, now=NOW)[1] == t0
 
 
+# ---------------------------------------------------------------- 뛴 다음의 피드백 (docs/demo_feedback_spec.md)
+# 기본 기록(_rows_ok): 직전 5km 1500초(과거 5km 1개 -> m = 직전) -> 예측 1485초(24:45), 명목 범위 1285 ~ 1765초.
+FB_FORBIDDEN = ["훈련", "휴식", "쉬", "권장", "추천", "하세요", "해야", "늘리", "줄이", "늘었", "줄었", "향상", "좋아졌", "나빠졌", "나아졌", "퇴보", "저하",
+                "확률", "달성", "때문", "원인", "덕분", "탓", "결과로"]
+
+
+def _after(days, km, t5, hours=0):
+    """기준 시점 이후 달리기 한 줄(시작 = ASOF + days일 + hours시간, 30분 소요)."""
+    st = ASOF + days * cd.DAY + hours * 3600
+    return (st, st + 1800, km, t5)
+
+
+def _fb(tmp, extra, now=NOW, name="fb.csv", rows=None):
+    path = _csv(tmp, (_rows_ok() if rows is None else rows) + list(extra), name)
+    res, text = cd.run(path, str(ASOF), P, now=now, feedback=True)
+    return res, text, text[text.index("뛴 다음의 피드백("):]
+
+
+def test_feedback_inside_range_slower_than_prediction():
+    with tempfile.TemporaryDirectory() as tmp:
+        res, _t, blk = _fb(tmp, [_after(2, 5.2, 1500.0)])
+        assert "차이(실제 − 예측): +15초 (음수 = 예측보다 빠름)" in blk and "명목 범위 대비 위치: 범위 안" in blk
+        assert "예측: 24:45 / 명목 80% 범위 21:25 ~ 29:25" in blk and "실제 기록: 1970-04-13 5km 시간 25:00" in blk
+        assert "학습 자료에서 예측보다 15초 이상 느렸던 경우: " in blk and "(train 폴드 밖 B2 잔차 기준)" in blk
+        assert res["feedback"]["pos"] == "in" and res["feedback"]["d"] == 15
+
+
+def test_feedback_faster_and_slower_than_range():
+    with tempfile.TemporaryDirectory() as tmp:
+        _r, _t, fast = _fb(tmp, [_after(2, 5.2, 1200.0)])
+        assert "차이(실제 − 예측): −285초" in fast and "명목 범위 대비 위치: 범위보다 빠름" in fast and "285초 이상 빨랐던 경우: " in fast
+        _r, _t, slow = _fb(tmp, [_after(2, 5.2, 1800.0)])
+        assert "차이(실제 − 예측): +315초" in slow and "명목 범위 대비 위치: 범위보다 느림" in slow and "315초 이상 느렸던 경우: " in slow
+        _r, _t, edge = _fb(tmp, [_after(2, 5.2, 1765.0)])                      # 범위 끝값(반올림 정수 기준)은 범위 안
+        assert "범위 안" in edge
+        _r, _t, same = _fb(tmp, [_after(2, 5.2, 1485.0)])
+        assert "차이(실제 − 예측): 0초" in same and "예측과 같았습니다" in same and "이상" not in same
+
+
+def test_feedback_no_record_and_not_elapsed():
+    with tempfile.TemporaryDirectory() as tmp:
+        _r, _t, blk = _fb(tmp, [_after(2, 3.0, None)])                         # 5km 아님
+        assert "다음 7일 안에 비교할 5km 기록이 없습니다" in blk and "아직 7일이 지나지 않았습니다" not in blk and "실제 기록" not in blk
+        _r, _t, early = _fb(tmp, [], now=ASOF + 3 * cd.DAY)                    # 7일 미경과
+        assert "다음 7일 안에 비교할 5km 기록이 없습니다" in early and "아직 7일이 지나지 않았습니다" in early
+        _r, _t, found = _fb(tmp, [_after(1, 5.2, 1500.0)], now=ASOF + 3 * cd.DAY)   # 이미 찾았으면 미경과 문구 없음
+        assert "실제 기록" in found and "아직 7일" not in found
+        for b in (blk, early, found):                                          # 고정 문장은 항상 출력
+            assert all(f in b for f in cd.FB_FIXED) and "다음 7일 안에 5km가 관측된 경우에 한한 비교" in b
+
+
+def test_feedback_window_boundaries_and_earliest():
+    with tempfile.TemporaryDirectory() as tmp:
+        extra = [_after(7, 5.2, 1400.0),            # 정확히 asof+7일: 제외([asof, asof+7일))
+                 _after(-10, 5.2, 1500.0),          # 기준 시점 전: 제외(예측에는 과거 기록으로 쓰이나 m은 그대로)
+                 _after(1, 4.9, 1400.0), _after(1, 5.6, 1400.0),     # 거리 범위 밖: 제외
+                 _after(5, 5.2, 1600.0), _after(3, 5.2, 1650.0)]     # 5일 뒤와 3일 뒤: 가장 이른 3일 뒤 기록(1650)을 쓴다
+        _r, _t, blk = _fb(tmp, extra, now=ASOF + 30 * cd.DAY)
+        assert "5km 시간 27:30" in blk and "차이(실제 − 예측): +165초" in blk and "건너뛰었습니다" not in blk and "1970-04-14" in blk
+
+
+def test_feedback_skips_runs_without_t5_and_reports_count():
+    with tempfile.TemporaryDirectory() as tmp:
+        _r, _t, blk = _fb(tmp, [_after(1, 5.2, None), _after(1, 5.3, None, hours=2), _after(2, 5.2, 1500.0)])
+        assert "이보다 먼저 뛴 5.0~5.5km 기록 2개는 5km 시간(t5_sec)이 없어 건너뛰었습니다" in blk and "실제 기록" in blk
+        _r, _t, only = _fb(tmp, [_after(1, 5.2, None)])                        # t5 있는 기록이 하나도 없음
+        assert "비교할 5km 기록이 없습니다" in only and "5.0~5.5km 기록 1개가 있으나 5km 시간(t5_sec)이 없어 비교하지 못했습니다" in only
+        _r, _t, later = _fb(tmp, [_after(1, 5.2, 1500.0), _after(2, 5.2, None)])  # 비교 대상 뒤의 t5 없는 기록은 세지 않는다
+        assert "건너뛰었습니다" not in later
+
+
+def test_feedback_extreme_actual_is_not_excluded():
+    with tempfile.TemporaryDirectory() as tmp:
+        _r, _t, blk = _fb(tmp, [_after(2, 5.2, 6000.0)])
+        assert "5km 시간 100:00" in blk and "범위보다 느림" in blk and "느렸던 경우: 1% 미만" in blk
+
+
+def test_feedback_ineligible_prediction_has_no_comparison():
+    with tempfile.TemporaryDirectory() as tmp:
+        _r, text, blk = _fb(tmp, [_after(2, 5.2, 1500.0)], rows=[(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)])
+        assert "예측할 수 없습니다" in text and "예측이 없어 비교하지 않습니다" in blk and "실제 기록" not in blk and all(f in blk for f in cd.FB_FIXED)
+
+
+def test_residual_cdf_interpolation_and_tails():
+    q = {"levels_percent": [10, 50, 90], "quantiles_sec": [-100.0, 0.0, 100.0]}
+    assert abs(cd.residual_cdf(-50, q) - 30.0) < 1e-9 and abs(cd.residual_cdf(50, q) - 70.0) < 1e-9 and abs(cd.residual_cdf(0, q) - 50.0) < 1e-9
+    assert abs(cd.residual_cdf(-100, q) - 10.0) < 1e-9 and abs(cd.residual_cdf(100, q) - 90.0) < 1e-9
+    assert cd.residual_cdf(-100.1, q) is None and cd.residual_cdf(100.1, q) is None
+    flat = {"levels_percent": [10, 50, 90], "quantiles_sec": [-10.0, -10.0, 10.0]}
+    assert 10.0 <= cd.residual_cdf(-10, flat) <= 50.0                           # 같은 값이 이어져도 오류 없이 계산
+    real = cd.load_quantiles()
+    v = real["quantiles_sec"]
+    assert abs(cd.residual_cdf(v[9], real) - 10.0) < 1e-9 and abs(cd.residual_cdf(v[49], real) - 50.0) < 1e-9 and abs(cd.residual_cdf(v[89], real) - 90.0) < 1e-9
+    mid = (v[9] + v[10]) / 2
+    assert abs(cd.residual_cdf(mid, real) - 10.5) < 1e-6                         # 인접 분위수 사이는 선형
+
+
+def test_feedback_share_matches_interpolated_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        q = cd.load_quantiles()
+        _r, _t, blk = _fb(tmp, [_after(2, 5.2, 1200.0)])
+        f = cd.residual_cdf(-285, q)
+        assert "285초 이상 빨랐던 경우: %.1f%%" % f in blk
+        _r, _t, blk = _fb(tmp, [_after(2, 5.2, 1800.0)])
+        assert "315초 이상 느렸던 경우: %.1f%%" % (100.0 - cd.residual_cdf(315, q)) in blk
+
+
+def test_feedback_quantile_file_is_valid_and_matches_b2_params():
+    q = cd.load_quantiles()
+    assert q["levels_percent"] == list(range(1, 100)) and len(q["quantiles_sec"]) == 99 and q["n"] == 1720
+    assert all(q["quantiles_sec"][i] <= q["quantiles_sec"][i + 1] for i in range(98))
+    real = cd.load_params()
+    assert abs(q["quantiles_sec"][9] - real["resid_q10"]) < 1e-3 and abs(q["quantiles_sec"][89] - real["resid_q90"]) < 1e-3     # 범위와 같은 폴드 밖 분포
+    assert set(q) == {"source", "n", "levels_percent", "quantiles_sec"}                                                             # ID·행 정보 없음
+    try:
+        import tempfile as _t
+        with _t.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / "q.json"
+            bad.write_text('{"levels_percent":[1,2],"quantiles_sec":[5.0,1.0]}', encoding="utf-8")
+            cd.load_quantiles(bad)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("단조가 아닌 분위수 표를 잡아야 함")
+
+
+def test_feedback_has_no_forbidden_expressions():
+    with tempfile.TemporaryDirectory() as tmp:
+        cases = [[_after(2, 5.2, 1500.0)], [_after(2, 5.2, 1200.0)], [_after(2, 5.2, 1800.0)], [_after(2, 5.2, 1485.0)], [_after(2, 5.2, 6000.0)],
+                 [], [_after(1, 5.2, None)], [_after(1, 5.2, None), _after(2, 5.2, 1500.0)]]
+        blocks = [_fb(tmp, ex)[2] for ex in cases] + [_fb(tmp, [], now=ASOF + 3 * cd.DAY)[2], _fb(tmp, [], rows=[(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)])[2]]
+        for b in blocks:
+            bad = [w for w in FB_FORBIDDEN if w in b]
+            assert not bad, (bad, b)
+
+
+def test_without_feedback_flag_output_is_unchanged():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _csv(tmp, _rows_ok([_after(2, 5.2, 1500.0)]))
+        res0, plain = cd.run(path, str(ASOF), P, now=NOW)
+        res1, with_fb = cd.run(path, str(ASOF), P, now=NOW, feedback=True)
+        assert "뛴 다음의 피드백" not in plain and "feedback" not in res0
+        assert with_fb.startswith(plain + "\n\n뛴 다음의 피드백(") and with_fb.count("뛴 다음의 피드백(") == 1
+        for k in ("pred", "lo", "hi", "y_hat", "ref", "m"):                                  # 예측·범위는 피드백 유무와 무관
+            assert res0[k] == res1[k]
+        _r, goal_fb = cd.run(path, str(ASOF), P, goal="24:00", now=NOW, feedback=True)         # 목표 비교 블록 뒤에 붙는다
+        assert goal_fb.index("목표 비교(") < goal_fb.index("뛴 다음의 피드백(")
+
+
+def test_feedback_number_check_catches_mismatch():
+    with tempfile.TemporaryDirectory() as tmp:
+        res, _t, blk = _fb(tmp, [_after(2, 5.2, 1500.0)])
+        info = res["feedback"]
+        assert cd.check_feedback_numbers(blk, info)
+        for old, new in [("+15초", "+16초"), ("21:25", "21:26"), ("24:45", "24:46")]:
+            try:
+                cd.check_feedback_numbers(blk.replace(old, new), info)
+            except ValueError:
+                continue
+            raise AssertionError("검사를 통과함: " + old)
+
+
+def test_feedback_example_outputs_match_live_runs():
+    import make_examples as mx
+    ex = Path(mx.OUT)
+    for csv_name, out_name in mx.FEEDBACK_OUTPUTS:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert cd.main([str(ex / csv_name), "--asof", mx.ASOF_TEXT, "--feedback"]) == 0
+        text = buf.getvalue()
+        assert (ex / out_name).read_text(encoding="utf-8") == text, out_name
+        plain = io.StringIO()
+        with contextlib.redirect_stdout(plain):
+            cd.main([str(ex / csv_name), "--asof", mx.ASOF_TEXT])
+        assert text.startswith(plain.getvalue().rstrip("\n") + "\n\n뛴 다음의 피드백(")          # 예측 부분은 --feedback 없는 출력과 같다
+    assert "범위 안" in (ex / mx.FEEDBACK_OUTPUTS[0][1]).read_text(encoding="utf-8") and "범위보다 빠름" in (ex / mx.FEEDBACK_OUTPUTS[1][1]).read_text(encoding="utf-8")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:

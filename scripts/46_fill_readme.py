@@ -60,13 +60,16 @@ ex = [("ex1_steady", "① 꾸준히 달린 사람", None), ("ex2_slower_last", "
       ("ex5_past1", "⑧ 조건별 안내: 과거 유효 5km 1개", None), ("ex6_past3", "⑨ 조건별 안내: 과거 유효 5km 2~4개", None),
       ("ex7_far_from_usual", "⑩ 조건별 안내: 직전 기록이 평소와 2분 넘게 차이", None), ("ex8_long_stop", "⑪ 조건별 안내: 직전 기록 세션 정지 300초 초과", None),
       ("ex10_multi", "⑫ 조건별 안내: 여러 층에 동시에 해당", None), ("ex9_no_note", "⑬ 조건별 안내 없음(과거 5km 5개, 평소와 차이 120초 이하, 정지 300초 이하)", None),
-      ("ex11_trend_smaller_a", "⑭ 방향 문장 (다): 보정 항이 기본 변화량보다 작아 최종 예측이 직전보다 빠름", None), ("ex12_trend_larger_a", "⑮ 방향 문장 (라): 보정 항이 더 커서 최종 예측이 직전보다 느림(평소 쪽)", None)]
+      ("ex11_trend_smaller_a", "⑭ 방향 문장 (다): 보정 항이 기본 변화량보다 작아 최종 예측이 직전보다 빠름", None), ("ex12_trend_larger_a", "⑮ 방향 문장 (라): 보정 항이 더 커서 최종 예측이 직전보다 느림(평소 쪽)", None),
+      ("ex13_feedback_inside", "⑯ 뛴 다음의 피드백: 실제 기록이 명목 범위 안", "FB"), ("ex14_feedback_faster", "⑰ 뛴 다음의 피드백: 실제 기록이 명목 범위보다 빠름(t5 없는 5km 1개 건너뜀)", "FB")]
 demo_blocks = []
 for f, title, goal in ex:
-    cmd = [sys.executable, "-I", "demo/coach_demo.py", f"demo/examples/{f}.csv", "--asof", "2025-03-03T00:00:00"] + (["--goal", goal] if goal else [])
+    cmd = [sys.executable, "-I", "demo/coach_demo.py", f"demo/examples/{f}.csv", "--asof", "2025-03-03T00:00:00"] + (["--feedback"] if goal == "FB" else (["--goal", goal] if goal else []))
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True)
     out = r.stdout.strip()
-    if goal:                                    # 목표 비교는 ①의 예측 출력 뒤에 이어지는 부분만 싣는다
+    if goal == "FB":                            # 피드백 블록은 예측 출력(--feedback 없는 출력과 같음) 뒤에 이어지는 부분만 싣는다
+        out = out[out.index("뛴 다음의 피드백("):]
+    elif goal:                                  # 목표 비교는 ①의 예측 출력 뒤에 이어지는 부분만 싣는다
         out = out[out.index("목표 비교("):]
     demo_blocks.append((f, title, out, goal))
 
@@ -112,6 +115,8 @@ A("python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:0
 A(f"python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, {n_tests}개)")
 A(f"python demo/test_import_apple_health.py # 애플 건강 가져오기 테스트(합성 XML·GPX, numpy/pandas 필요, {n_tests_imp}개)")
 A("python demo/make_examples.py            # 합성 예시 CSV 재생성(seed 고정)")
+A("python demo/coach_demo.py demo/examples/ex13_feedback_inside.csv --asof 2025-03-03T00:00:00 --feedback   # 뛴 다음의 피드백(기준 시점 이후 7일 안 첫 5km와 예측 비교)")
+A("python demo/make_feedback_quantiles.py  # feedback_quantiles.json 재생성(로컬 data/ 필요; 다시 실행해 git diff가 비면 재생성 확인)")
 A("python demo/make_stratum_notes.py       # stratum_notes.json 재생성(docs/b2_failure_5km.md의 train 폴드 밖 행만 읽음)")
 A("python demo/make_b2_params.py           # b2_params.json과 docs/demo_interval_check.md 재생성(로컬 data/ 필요)")
 A("python demo/bench_demo.py               # docs/demo_performance.md 재생성")
@@ -120,7 +125,7 @@ A("")
 A("입력 CSV 열: `start_time, end_time, distance_km, duration_sec, avg_hr, t5_sec`(5km 세션만 t5_sec = 5.000km 도달 시간, 그 외 비움). 예시는 **직접 만든 합성 데이터**이며 실제 데이터와 무관하다(데이터 재배포 금지).")
 A("")
 for f, title, out, goal in demo_blocks:
-    cmd_note = f"`--goal {goal}`, 위 ①의 예측 출력 뒤에 이어지는 부분" if goal else "기준 시점 2025-03-03"
+    cmd_note = "`--feedback`, 기준 시점 2025-03-03, 예측 출력 뒤에 이어지는 피드백 블록" if goal == "FB" else (f"`--goal {goal}`, 위 ①의 예측 출력 뒤에 이어지는 부분" if goal else "기준 시점 2025-03-03")
     A(f"**{title}** (`demo/examples/{f}.csv`, {cmd_note})")
     A("")
     A("```text")
@@ -134,6 +139,7 @@ A("  1. 아이폰 건강 앱 > 프로필 > '모든 건강 데이터 내보내기
 A("  2. `python demo/import_apple_health.py --zip <저장소 밖 폴더>/my_runs/내보내기.zip --out <저장소 밖 폴더>/my_runs/runs.mine.csv` (경로가 있는 애플워치 기록만 `t5_sec`·`stop_sec`가 채워지고, 끝에 이유별 개수를 요약한다. `--out`이 저장소 안이면 멈춘다.)")
 A("  3. `python demo/coach_demo.py <저장소 밖 폴더>/my_runs/runs.mine.csv --asof 2025-10-20T00:00:00` (+ 선택 `--goal 24:00`)")
 A("  - 시각은 +0900 표기를 바꾸지 않고 현지 벽시계 그대로(시간대 표기 없이) 적으므로 `--asof`도 한국 시각으로 지정한다. `avg_hr`는 선택 열이고 예측에 쓰지 않는다. 좌표는 어디에도 저장·출력하지 않는다. t5는 연구 파이프라인 함수(`38_build_5km_dataset.compute_t5`)를 그대로 불러 쓰므로 numpy/pandas가 필요하다.")
+A("- **`--feedback`**(사양 [`docs/demo_feedback_spec.md`](docs/demo_feedback_spec.md)): 기준 시점(`--asof`) 이후 7일 안에 시작한 5.0~5.5km 달리기 중 `t5_sec`가 있는 가장 이른 기록(극단도 제외하지 않음)을 예측과 비교해 실제 기록, 차이(실제 − 예측, 초), 명목 범위 대비 위치(범위보다 빠름 / 범위 안 / 범위보다 느림), 학습 자료에서 그만큼 이상 빨랐거나 느렸던 경우의 비율을 보여 준다. 비율은 범위 보정과 같은 train 폴드 밖 B2 잔차의 1%~99% 분위수 표([`demo/feedback_quantiles.json`](demo/feedback_quantiles.json), 집계값만 있음)를 선형 보간한 값이며 test 자료는 쓰지 않는다. 비교할 기록이 없거나 7일이 아직 지나지 않았으면 그렇게 알려 준다. 범위 안·밖은 실력 변화의 증거가 아니고 1회 관측이며 예측 성능의 근거가 아니다(고정 문장으로 항상 표시). 처방·원인 설명·실력 변화 판정·달성 확률은 하지 않는다. `--feedback`이 없으면 출력은 기존과 같다.")
 A("- **`--goal mm:ss`**: 목표(10:00~83:20)를 명목 범위와 비교해 \"명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림\" 중 하나와 예측−목표 차이(초)를 보여 준다. 범위 안·밖은 달성 확률이나 달성 가능 여부를 뜻하지 않으며 훈련 처방을 제공하지 않는다. 목표를 넣지 않으면 출력은 기존과 같다.")
 A(f"- **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start {cov[0][3]}%({cov[0][1]}개), personalized {cov[1][3]}%({cov[1][1]}개). 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.")
 A(f"- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 {b2c[0]} ms, tracemalloc 최대 {b2c[3]}바이트, 파라미터 파일 {b2c[4]}바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).")

@@ -102,6 +102,13 @@ def main():
     write("ex11_trend_smaller_a.csv", trend_rows(1488.0))
     # 12) 방향 문장 (라): 직전 기록이 평소보다 40초 빠름 -> 보정 항(+31.6초)이 기본 변화량보다 커서 최종 예측은 직전보다 느림(평소 쪽)
     write("ex12_trend_larger_a.csv", trend_rows(1455.0))
+    # 13~14) 뛴 다음의 피드백(--feedback): ex9와 같은 과거 기록(예측 24:45, 명목 80% 범위 21:23 ~ 29:23) + 기준 시점(2025-03-03) 이후 기록. 난수 없음
+    after_inside = [["2025-03-05T18:00:00", "2025-03-05T18:24:30", 5.2, 1470, 156, 1470.0, 30]]                    # 24:30 -> 범위 안
+    after_faster = [["2025-03-04T07:00:00", "2025-03-04T07:26:00", 5.1, 1560, 154, "", 30],                       # t5 없는 5km(건너뜀)
+                    ["2025-03-06T18:00:00", "2025-03-06T18:20:30", 5.2, 1230, 158, 1230.0, 30]]                   # 20:30 -> 범위보다 빠름
+    base9 = stop_rows([(3, 1500.0, 40)] + [(d, 1500.0, 40) for d in (10, 17, 24, 40)])
+    write7("ex13_feedback_inside.csv", base9 + after_inside)
+    write7("ex14_feedback_faster.csv", base9 + after_faster)
     print("saved", sorted(p.name for p in OUT.glob("*.csv")))
     write_outputs()
 
@@ -114,6 +121,9 @@ OUTPUTS = [("ex1_steady.csv", None, "ex1_steady.out.txt"), ("ex2_slower_last.csv
            ("ex5_past1.csv", None, "ex5_past1.out.txt"), ("ex6_past3.csv", None, "ex6_past3.out.txt"), ("ex7_far_from_usual.csv", None, "ex7_far_from_usual.out.txt"),
            ("ex8_long_stop.csv", None, "ex8_long_stop.out.txt"), ("ex9_no_note.csv", None, "ex9_no_note.out.txt"), ("ex10_multi.csv", None, "ex10_multi.out.txt"),
            ("ex11_trend_smaller_a.csv", None, "ex11_trend_smaller_a.out.txt"), ("ex12_trend_larger_a.csv", None, "ex12_trend_larger_a.out.txt")]
+
+# --feedback 예시: (CSV, 출력 파일). 예측 부분은 --feedback 없는 출력과 같고 뒤에 피드백 블록이 붙는다.
+FEEDBACK_OUTPUTS = [("ex13_feedback_inside.csv", "ex13_feedback_inside.out.txt"), ("ex14_feedback_faster.csv", "ex14_feedback_faster.out.txt")]
 
 
 def write_outputs():
@@ -130,7 +140,13 @@ def write_outputs():
             code = coach_demo.main(argv)
         assert code == 0, (csv_name, goal, code)
         (OUT / out_name).write_text(buf.getvalue(), encoding="utf-8", newline="\n")
-    print("saved outputs", [o for _c, _g, o in OUTPUTS])
+    for csv_name, out_name in FEEDBACK_OUTPUTS:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = coach_demo.main([str(OUT / csv_name), "--asof", ASOF_TEXT, "--feedback"])
+        assert code == 0, (csv_name, code)
+        (OUT / out_name).write_text(buf.getvalue(), encoding="utf-8", newline="\n")
+    print("saved outputs", [o for _c, _g, o in OUTPUTS] +[o for _c, o in FEEDBACK_OUTPUTS])
 
 
 if __name__ == "__main__":
