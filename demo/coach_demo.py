@@ -7,13 +7,14 @@
 입력 CSV 열: start_time, end_time, distance_km, duration_sec, avg_hr, t5_sec
   - start_time/end_time: 에포크 초 또는 ISO 일시(시간대 표기가 없으면 UTC로 두고 일관되게만 사용; 시각 기준 미확인)
   - t5_sec: 5.0~5.5km 세션에서 5.000km 지점 도달 시간(초). 그 외 세션은 비움
-사용: python demo/coach_demo.py 세션.csv --asof 2025-01-06T00:00:00
+사용: python demo/coach_demo.py 세션.csv --asof 2025-01-06T00:00:00 [--goal 24:30]
 자격(주 분석 정의 그대로): 기준 시점 직전 28일 안에 끝난 달리기 4회 이상 + 그 창 안 유효 5km 기록 1회 이상(t5_sec <= 5000초, 5.0~5.5km).
 기준 기록 = 창 안 가장 늦게 시작한 유효 5km. 평소 기록 m = 기준 시점 전에 끝난 유효 5km의 중앙값(1회뿐이면 m = 기준 기록).
 가장 최근 5km 기록이 5.0~5.5km 범위 밖이거나 극단(T5 > 5,000초)이면 사전 선언 규칙대로 그 이전의 유효 기록을 기준 기록으로 쓰고 그 사실을 표시한다.
 예측: y_hat = a + b x (기준 기록 - m), 예상 기록 = 기준 기록 + y_hat.
 기준 시점까지 끝나지 않은 세션은 사용하지 않는다. 입력 검사는 예측 시점에 관측 가능한 값만 쓴다(미래 값으로 거르는 규칙 없음).
-입력 문제(파일, 형식, 날짜)는 프로그램이 멈추지 않고 '오류: 이유 / 해결: 방법'을 한국어로 출력한다(종료 코드 2).
+입력·옵션 문제(파일, 형식, 날짜, --goal)는 프로그램이 멈추지 않고 '오류: 이유 / 해결: 방법'을 한국어로 출력한다(종료 코드 2).
+--goal mm:ss: 예측 범위와 목표를 비교해 '명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림' 중 하나를 보여준다(달성 확률·훈련 처방 아님).
 """
 import argparse
 import csv
@@ -31,6 +32,7 @@ WIN_DAYS = 28
 MIN_RUNS = 4
 EXTREME_SEC = 5000.0
 KM_LO, KM_HI = 5.0, 5.5
+GOAL_MIN_SEC, GOAL_MAX_SEC = 600, 5000
 PARAMS_PATH = Path(__file__).resolve().parent / "b2_params.json"
 REQUIRED_COLS = ["start_time", "end_time", "distance_km", "duration_sec", "avg_hr", "t5_sec"]
 EXAMPLE_CMD = "python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00"
@@ -165,6 +167,19 @@ def parse_asof(asof, now):
     return v
 
 
+def parse_goal(text):
+    s = str(text).strip()
+    m = re.fullmatch(r"(\d{1,3}):([0-5]\d)", s)
+    if not m:
+        raise InputProblem("목표 형식이 올바르지 않습니다(mm:ss 필요).", "분:초로 입력하세요(초는 00~59). 예: --goal 24:30")
+    sec = int(m.group(1)) * 60 + int(m.group(2))
+    if sec < GOAL_MIN_SEC:
+        raise InputProblem("목표가 10분 미만입니다.", "10:00 이상 83:20 이하(5,000초 이하)로 입력하세요.")
+    if sec > GOAL_MAX_SEC:
+        raise InputProblem("목표가 5,000초(83:20)를 넘습니다.", "83:20 이하로 입력하세요(5,000초를 넘는 기록은 극단 기록으로 분류됩니다).")
+    return sec
+
+
 def is_valid_5km(s):
     return s["t5"] is not None and KM_LO <= s["km"] <= KM_HI and 0 < s["t5"] <= EXTREME_SEC
 
@@ -282,6 +297,35 @@ def format_report(res):
             + "이 예측은 원인 분석이 아니며, 주마다 기록이 크게 흔들릴 수 있습니다.")
 
 
+def format_goal(res, goal_sec, params):
+    """--goal 비교 블록. 범위 밖/안만 알려 주며 달성 확률이나 훈련 처방이 아니다. 반환 (문구, 점검용 정보)."""
+    lo_s, hi_s, pred_s = int(round(res["lo"])), int(round(res["hi"])), int(round(res["pred"]))
+    if goal_sec < lo_s:
+        label = "명목 범위보다 빠름"
+    elif goal_sec > hi_s:
+        label = "명목 범위보다 느림"
+    else:
+        label = "명목 범위 안"
+    diff = pred_s - goal_sec                      # 예측 − 목표(초)
+    if diff > 0:
+        dtxt = "목표가 예측보다 %d초 빠름" % diff
+    elif diff < 0:
+        dtxt = "목표가 예측보다 %d초 느림" % (-diff)
+    else:
+        dtxt = "목표와 예측이 같음"
+    q10, q90 = params["resid_q10"], params["resid_q90"]
+    width_min = int(round((q90 - q10) / 60.0))
+    fast = abs(int(round(q10)))
+    s1 = "범위 안이라는 것은 달성 확률이 아니며, 훈련 처방을 제공하지 않습니다."
+    s2 = ("현재 범위 폭은 약 %d분(%s초 ~ %s초)으로 넓어, 예측보다 약 %d분 %d초 빠른 목표까지 범위 안으로 표시됩니다."
+          % (width_min, signed(q10), signed(q90), fast // 60, fast % 60))
+    text = ("목표 비교(목표 %s): %s\n" % (mmss(goal_sec), label)
+            + "예측값과 목표의 차이(예측 − 목표): %s초 (%s)\n" % (signed(diff), dtxt)
+            + s1 + "\n" + s2)
+    info = {"goal": mmss(goal_sec), "ints": {str(abs(diff)), str(width_min), str(abs(int(round(q10)))), str(abs(int(round(q90)))), str(fast // 60), str(fast % 60)}, "label": label, "s1": s1, "s2": s2}
+    return text, info
+
+
 # 템플릿에 고정된 숫자(다음 7일, 5km, 80%, 지난 4주, 28일, 4회, 5,000초, 5.0~5.5km)와 파일 이름 속 5. 계산값이 아니므로 따로 허용한다.
 TEMPLATE_INTS = {"4", "5", "7", "28", "80", "000"}
 TEMPLATE_DECS = {"5.0", "5.5"}
@@ -332,16 +376,41 @@ def check_numbers(text, res):
     return True
 
 
-def run(csv_path, asof, params=None, now=None):
+def check_goal_numbers(text, info):
+    """목표 비교 블록의 숫자가 계산값과 일치하는지 검사한다. 불일치 시 ValueError."""
+    tokens = _TOKEN.findall(text)
+    times = [t for t in tokens if ":" in t]
+    if times != [info["goal"]]:
+        raise ValueError("목표 시간 표기가 계산값과 다름")
+    for t in tokens:
+        if ":" not in t and t not in info["ints"]:
+            raise ValueError("계산값과 맞지 않는 숫자: " + t)
+    for frag in (info["label"], info["s1"], info["s2"]):
+        if frag not in text:
+            raise ValueError("문구에 필요한 문장이 없음")
+    return True
+
+
+def run(csv_path, asof, params=None, goal=None, now=None):
     """입력 검사 → 예측 → 문구와 숫자 검사. 입력·옵션 문제는 InputProblem. 반환 (res, 출력 문구)."""
     params = params or load_params()
     now = time.time() if now is None else now
     asof_s = parse_asof(asof, now)
+    goal_s = parse_goal(goal) if goal is not None else None
     sessions, notices = load_sessions(csv_path, now)
     res = assess(sessions, asof_s, params)
     main_text = format_report(res)
     check_numbers(main_text, res)
     parts = ["※ " + n for n in notices + res["notices"]] + [main_text]
+    if goal_s is not None:
+        if res["eligible"]:
+            g_text, info = format_goal(res, goal_s, params)
+            check_goal_numbers(g_text, info)
+            parts.append("")
+            parts.append(g_text)
+        else:
+            parts.append("")
+            parts.append("목표 비교는 예측이 가능할 때만 표시합니다. 위 부족한 조건을 채운 뒤 다시 실행하세요.")
     return res, "\n".join(parts)
 
 
@@ -349,9 +418,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="다음 7일 5km 기록 예상(평균 회귀 규칙) 시연")
     ap.add_argument("csv", help="세션 CSV (열: " + ", ".join(REQUIRED_COLS) + ")")
     ap.add_argument("--asof", required=True, help="기준 시점(에포크 초 또는 ISO 일시)")
+    ap.add_argument("--goal", default=None, help="목표 기록 mm:ss(10:00~83:20). 예측 범위와 비교해 '명목 범위보다 빠름/안/느림'을 보여 준다")
     a = ap.parse_args(argv)
     try:
-        _res, text = run(a.csv, a.asof)
+        _res, text = run(a.csv, a.asof, goal=a.goal)
     except InputProblem as e:
         print(problem_text(e))
         return 2
