@@ -759,6 +759,51 @@ def test_feedback_example_outputs_match_live_runs():
     assert "범위 안" in (ex / mx.FEEDBACK_OUTPUTS[0][1]).read_text(encoding="utf-8") and "범위보다 빠름" in (ex / mx.FEEDBACK_OUTPUTS[1][1]).read_text(encoding="utf-8")
 
 
+# ---------------------------------------------------------------- 사례표 docs/demo_cases.md
+def test_demo_cases_doc_matches_regeneration():
+    import make_demo_cases as mc
+    doc = (Path(mc.DOC)).read_text(encoding="utf-8")
+    assert mc.build() == doc                                                   # make_examples.py로 다시 만든 예시와 같은 표
+    assert mc.build() == mc.build()                                            # 결정적
+    import make_examples as mx
+    keep = mx.OUT
+    with tempfile.TemporaryDirectory() as tmp:                                  # make_examples.py로 예시를 처음부터 다시 만들어도 같은 표
+        mx.OUT = Path(tmp)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                mx.main()
+            assert mc.build() == doc
+            for p in keep.glob("*.csv"):
+                assert (Path(tmp) / p.name).read_bytes() == p.read_bytes(), p.name
+        finally:
+            mx.OUT = keep
+
+
+def test_demo_cases_cover_all_examples_and_reference_existing_tests():
+    import make_demo_cases as mc
+    import make_examples as mx
+    src = Path(__file__).read_text(encoding="utf-8")
+    assert [c[0] for c in mc.CASES] == list("①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰")
+    used = {c[1] for c in mc.CASES}
+    assert used == {p.name for p in Path(mx.OUT).glob("*.csv")}                # demo/examples의 CSV가 하나도 빠지지 않음
+    cats = {c[2] for c in mc.CASES}
+    assert cats == {"정상 예측", "조건별 안내", "예측 불가(자격 미달)", "목표 비교", "뛴 다음의 피드백"}
+    names = [t for c in mc.CASES for t in c[5]] + [e[3] for e in mc.input_error_cases()]
+    for t in names:
+        assert ("def %s(" % t) in src, t                                       # 표에 적은 테스트 이름이 실제로 있음
+    assert "정상 예측" in Path(mc.DOC).read_text(encoding="utf-8") and "입력 오류" in Path(mc.DOC).read_text(encoding="utf-8")
+
+
+def test_demo_cases_forbidden_list_matches_feedback_test_list():
+    import make_demo_cases as mc
+    assert mc.FORBIDDEN == FB_FORBIDDEN
+    doc = Path(mc.DOC).read_text(encoding="utf-8")
+    for w in FB_FORBIDDEN:
+        assert '"%s"' % w in doc
+    for kind in ("처방", "확률", "원인 설명", "실력 변화 판정"):
+        assert kind in doc.split("## 3. 이 프로그램이 하지 않는 것")[1]
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
