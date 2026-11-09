@@ -75,8 +75,10 @@ for f, title, goal in ex:
 
 # ---- 포함률·성능
 chk = txt("docs/demo_interval_check.md")
-cov = re.findall(r"\| 보정\([^|]*\| (cold-start test|personalized 평가) \| (\d+) \| (\d+) \| ([\d.]+)% \|", chk)   # 시연이 쓰는 보정 범위 행
-assert len(cov) == 2
+cov = re.findall(r"\| 보정\([^|]*\| (cold-start test) \| (\d+) \| (\d+) \| ([\d.]+)% \|", chk)   # 시연이 쓰는 보정 범위 행(cold-start만; personalized는 학습 자료와 겹쳐 독립 평가가 아님)
+assert len(cov) == 1
+ov = re.search(r"personalized 평가 행은 학습 자료와 겹쳐 독립 평가가 아니다\.\*\* (\d+)건 중 (\d+)건", chk)
+assert ov, "분할 불일치 문구 없음"
 perf = txt("docs/demo_performance.md")
 prow = {}
 for line in perf.splitlines():
@@ -141,7 +143,7 @@ A("  3. `python demo/coach_demo.py <저장소 밖 폴더>/my_runs/runs.mine.csv 
 A("  - 시각은 +0900 표기를 바꾸지 않고 현지 벽시계 그대로(시간대 표기 없이) 적으므로 `--asof`도 한국 시각으로 지정한다. `avg_hr`는 선택 열이고 예측에 쓰지 않는다. 좌표는 어디에도 저장·출력하지 않는다. t5는 연구 파이프라인 함수(`38_build_5km_dataset.compute_t5`)를 그대로 불러 쓰므로 numpy/pandas가 필요하다.")
 A("- **`--feedback`**(사양 [`docs/demo_feedback_spec.md`](docs/demo_feedback_spec.md)): 기준 시점(`--asof`) 이후 7일 안에 시작한 5.0~5.5km 달리기 중 `t5_sec`가 있는 가장 이른 기록(극단도 제외하지 않음)을 예측과 비교해 실제 기록, 차이(실제 − 예측, 초), 명목 범위 대비 위치(범위보다 빠름 / 범위 안 / 범위보다 느림), 학습 자료에서 그만큼 이상 빨랐거나 느렸던 경우의 비율을 보여 준다. 비율은 범위 보정과 같은 train 폴드 밖 B2 잔차의 1%~99% 분위수 표([`demo/feedback_quantiles.json`](demo/feedback_quantiles.json), 집계값만 있음)를 선형 보간한 값이며 test 자료는 쓰지 않는다. 비교할 기록이 없거나 7일이 아직 지나지 않았으면 그렇게 알려 준다. 범위 안·밖은 실력 변화의 증거가 아니고 1회 관측이며 예측 성능의 근거가 아니다(고정 문장으로 항상 표시). 처방·원인 설명·실력 변화 판정·달성 확률은 하지 않는다. `--feedback`이 없으면 출력은 기존과 같다.")
 A("- **`--goal mm:ss`**: 목표(10:00~83:20)를 명목 범위와 비교해 \"명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림\" 중 하나와 예측−목표 차이(초)를 보여 준다. 범위 안·밖은 달성 확률이나 달성 가능 여부를 뜻하지 않으며 훈련 처방을 제공하지 않는다. 목표를 넣지 않으면 출력은 기존과 같다.")
-A(f"- **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start {cov[0][3]}%({cov[0][1]}개), personalized {cov[1][3]}%({cov[1][1]}개). 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.")
+A(f"- **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start {cov[0][3]}%({cov[0][1]}개). personalized 포함률은 학습 자료와 겹쳐 독립 평가가 아니므로(전체 {ov.group(1)}건 중 {ov.group(2)}건 중복, [`docs/interval_by_condition.md`](docs/interval_by_condition.md) 4절) 주 결과로 쓰지 않는다. cold-start 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.")
 A(f"- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 {b2c[0]} ms, tracemalloc 최대 {b2c[3]}바이트, 파라미터 파일 {b2c[4]}바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).")
 A("- 이 데모는 원인 분석이나 훈련 처방이 아니며, 모델 정확도의 이점을 주장하지 않는다(현재 자료로 모델과 B2의 우열을 확정할 수 없어 가장 단순한 규칙을 택했다).")
 A("")

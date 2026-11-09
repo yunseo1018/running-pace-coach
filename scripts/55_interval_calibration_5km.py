@@ -111,6 +111,11 @@ def main():
     _ptr, pers, _u = m42.personalized_split(ds)
     assert (len(cold), cold.uid.nunique(), len(pers), pers.uid.nunique()) == (352, 71, 442, 250)
 
+    # 분할 불일치(11/9 확인): personalized 평가 행 중 시연 a·b와 범위를 만든 train 평가 대상(1,720개)에 그대로 들어 있는 행
+    tr_keys = set(zip(tr.uid, tr.t))
+    n_ov = sum((u, t) in tr_keys for u, t in zip(pers.uid, pers.t))
+    n_pers = len(pers)
+    NOTE_PERS = f"독립 평가 아님(학습 자료와 겹침, {n_ov}/{n_pers}건 중복)"
     ranges = {"기존(표본 내 잔차)": (q10_ins, q90_ins), "보정(폴드 밖 잔차)": (q10_oof, q90_oof)}
     rows, texts, info = [], [], {}
     for name, ev in (("cold-start test", cold), ("personalized", pers)):
@@ -120,6 +125,10 @@ def main():
         rows += r
         texts += t
         info[name] = i
+    for r in rows:      # personalized 행은 학습 자료와 겹쳐 독립 평가가 아니므로 포함률 계열을 주 결과로 싣지 않는다
+        if r["평가 조건"] == "personalized":
+            for k in ("포함률(풀링)", "95% CI(사용자 bootstrap)", "범위 아래 / 위로 벗어남", "사용자별 포함률 중앙값 [IQR]", "포함률 50% 미만 사용자"):
+                r[k] = NOTE_PERS if k == "포함률(풀링)" else "-"
     # train 폴드 밖 sanity(구성상 약 80%)
     in_oof = float(((res >= q10_oof) & (res <= q90_oof)).mean())
     in_ins = float(((ins >= q10_ins) & (ins <= q90_ins)).mean())
@@ -142,15 +151,18 @@ def main():
            "## 2. test 결과 (탐색 결과; 기존 범위와 보정 범위 나란히)", "",
            md_table(rows), "",
            f"- 포함률(풀링) = 정답 y가 범위 안에 들어간 평가 대상의 비율. 95% CI는 사용자 단위 bootstrap(사용자 복원추출 {N_BOOT:,}회, seed {SEED}, 백분위 CI, 모든 범위·조건에 같은 추출)이다. 평균 폭은 q90 − q10으로 모든 예측에 같다.",
-           "- ŷ는 두 조건 모두 시연의 B2(cold-start train 적합)로 계산했다. personalized 평가 행에는 학습(train) 사용자의 뒤쪽 기준 시점이 섞여 있어 학습 자료와 완전히 독립이 아니다.", "",
+           f"- ŷ는 두 조건 모두 시연의 B2(cold-start train 적합)로 계산했다. **personalized 평가 행은 학습 자료와 겹쳐 독립 평가가 아니다**: {n_pers}건 중 {n_ov}건이 시연의 a·b와 범위를 만든 train 평가 대상 1,720건에 그대로 들어 있다(`docs/interval_by_condition.md` 4절). 그래서 personalized 포함률은 이 표에서 주 결과로 싣지 않는다(\"-\" 표시, 계산하지 않은 것이 아니라 보고하지 않는 것이며 새로 계산하지도 않았다).", "",
            "평가 대상 수 분포(사용자당 중앙값 [25%, 75%], 1개뿐인 사용자 수):", "",
            md_table([{"평가 조건": nm, "평가 대상": f"{i[0]:,}", "사용자": f"{i[1]:,}", "사용자당 평가 대상 중앙값 [25%, 75%]": f"{i[2]:.0f} [{i[3]:.0f}, {i[4]:.0f}]", "평가 대상이 1개뿐인 사용자": f"{i[5]:,}"} for nm, i in info.items()]), "",
            "## 3. 해석 (사양 3절의 규칙)", ""]
     for nm, rn, pooled, cl, ch, read in texts:
-        out.append(f"- {nm}, {rn}: 포함률 {100 * pooled:.1f}% [{100 * cl:.1f}%, {100 * ch:.1f}%] → **{read}**.")
+        if nm == "personalized":
+            out.append(f"- {nm}, {rn}: {NOTE_PERS} → 해석하지 않는다.")
+        else:
+            out.append(f"- {nm}, {rn}: 포함률 {100 * pooled:.1f}% [{100 * cl:.1f}%, {100 * ch:.1f}%] → **{read}**.")
     out += ["",
             f"- 보정 범위는 기존 범위보다 폭이 {(q90_oof - q10_oof) - (q90_ins - q10_ins):.1f}초 넓다. 포함률은 " + ", ".join(
-                f"{nm}에서 {100 * [t for t in texts if t[0] == nm and t[1].startswith('보정')][0][2]:.1f}%(기존 {100 * [t for t in texts if t[0] == nm and t[1].startswith('기존')][0][2]:.1f}%)" for nm in info)
+                f"{nm}에서 {100 * [t for t in texts if t[0] == nm and t[1].startswith('보정')][0][2]:.1f}%(기존 {100 * [t for t in texts if t[0] == nm and t[1].startswith('기존')][0][2]:.1f}%)" for nm in info if nm == "cold-start test")
             + "이다(점추정). 폭과 포함률의 이 교환은 구성상의 것이며 범위가 개별 예측의 정확성을 뜻하지 않는다. 개인에게 80%를 보장한다고 쓰지 않는다.",
             "- 사용자별 포함률은 평가 대상이 1개뿐인 사용자에서 0% 또는 100%가 되므로 분포의 해석에 한계가 있다(특히 personalized). test 결과는 이미 열람한 자료의 탐색 결과다.",
             f"- **시연은 이 결과와 상관없이 보정 범위를 쓴다**(사양 1·4절): \"명목 80% 범위\", \"테스트 포함률 {100 * cov_cold:.1f}%(탐색 결과), 개인에게 80%를 보장하지 않음\"(보정 범위의 cold-start test 포함률).",

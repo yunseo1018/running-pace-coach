@@ -19,7 +19,7 @@
 
 ## 2. 평가와 보고 항목 (test cold-start·personalized 각각, 기존·보정 범위 나란히)
 
-- 평가 행: 49c02f8의 평가 행. cold-start test 352개·71명, personalized 442개·250명(test 사용자 78개 포함, train 사용자의 뒤쪽 기준 시점이 섞여 있어 학습 자료와 완전히 독립이 아님). ŷ는 두 조건 모두 시연의 B2(cold-start train 적합 a, b)로 계산한다(`docs/demo_interval_check.md`와 같은 방식).
+- 평가 행: 49c02f8의 평가 행. cold-start test 352개·71명, personalized 442개·250명(test 사용자 78개 포함, train 사용자의 뒤쪽 기준 시점이 섞여 있어 학습 자료와 완전히 독립이 아님 — [주석 11/9: 442건 중 364건이 시연 a·b와 범위를 만든 train 1,720건에 포함되어 독립 평가가 아님. 사양 본문은 그대로 두며 결과 문서 `interval_calibration_5km.md`는 personalized 포함률을 주 결과로 싣지 않는다]). ŷ는 두 조건 모두 시연의 B2(cold-start train 적합 a, b)로 계산한다(`docs/demo_interval_check.md`와 같은 방식).
 - 보고 항목:
   1. **포함률**(풀링) = 정답 y가 [ŷ+q10, ŷ+q90]에 들어간 평가 대상의 비율. 범위 아래/위로 벗어난 비율도 참고로 함께 적는다.
   2. **평균 폭(초)** = q90 − q10.

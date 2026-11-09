@@ -63,3 +63,4 @@
 - 보간 간격 집계(`docs/sample_reduction_5km.md` 3절, `scripts/50_interp_gap_5km.py`): 평가 대상의 기준 기록·정답 세션에서 보간에 쓴 두 점의 시간·거리 간격만 집계했다. 기록 변화(초)·T5 값의 분포는 계산하지 않았다.
 - 사양 고정 커밋 이후 실행·열람(예측 범위 보정): `docs/interval_calibration_spec_5km.md`(커밋 76b5922) 고정 뒤 `scripts/55_interval_calibration_5km.py`를 실행하고 `docs/interval_calibration_5km.md`(cold-start test·personalized 포함률·폭·사용자별 분포)를 열람했다. test는 이미 열람한 자료이므로 탐색 결과이며, 범위 규칙은 train 폴드 밖 잔차로만 정했고 결과로 바꾸지 않았다.
 - 사양 고정 커밋 이후 실행·열람(B2 실패 지점 층별 점검): `docs/posthoc_spec_b2_failure_5km.md`(커밋 f5ba594) 고정 뒤 `scripts/56_b2_failure_5km.py`를 실행하고 `docs/b2_failure_5km.md`(train 폴드 밖 층별 결과, test cold-start 탐색 결과)를 열람했다. 사후 분석이며 층 정의는 결과로 바꾸지 않았고 시연 규칙(B2 식·파라미터·범위·문구)도 바꾸지 않는다.
+- 분할 불일치 확인(11/9, 읽기 전용, `scripts/58_interval_by_condition_5km.py` 4절): personalized 평가 442건 중 364건이 시연 a·b와 범위를 만든 train 1,720건에 포함됨을 확인했다. personalized 포함률(77.8%)은 독립 평가가 아니므로 주 결과로 쓰지 않는다. 새로 계산하지 않았다.
