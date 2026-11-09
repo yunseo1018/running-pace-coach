@@ -17,6 +17,7 @@
 예측: y_hat = a + b x (기준 기록 - m), 예상 기록 = 기준 기록 + y_hat.
 기준 시점까지 끝나지 않은 세션은 사용하지 않는다. 입력 검사는 예측 시점에 관측 가능한 값만 쓴다(미래 값으로 거르는 규칙 없음).
 입력·옵션 문제(파일, 형식, 날짜, --goal)는 프로그램이 멈추지 않고 '오류: 이유 / 해결: 방법'을 한국어로 출력한다(종료 코드 2).
+기본 출력은 요약 화면([결과]/[상태]/[안내]/[근거]/[주의]); --detail은 뒤에 기존 전체 출력(자세히 보기)을 그대로 붙인다(docs/demo_screen_spec.md).
 --goal mm:ss: 예측 범위와 목표를 비교해 '명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림' 중 하나를 보여준다(달성 확률·훈련 처방 아님).
 --feedback: 예측 뒤에 기준 시점 이후 7일 안 첫 5km 기록과 예측의 비교(범위 안·밖, 차이, 학습 자료 기준 비율)를 붙인다(처방·원인·실력 판정 아님; docs/demo_feedback_spec.md).
 """
@@ -531,16 +532,21 @@ def find_actual(sessions, asof, now):
 
 def format_feedback(res, fb, quantiles):
     """피드백 블록. 반환 (문구, 점검용 정보)."""
-    info = {"ints": set(), "times": [], "dates": [], "share": None}
+    info = {"ints": set(), "times": [], "dates": [], "share": None, "unobserved": False}
     lines = [FB_HEAD]
+    summ = []
     if not res["eligible"]:
         lines.append("[입력 부족] 예측이 없어 비교하지 않습니다(위 부족한 조건이 충족되면 비교할 수 있습니다).")
+        summ.append("[입력 부족] 예측이 없어 비교하지 않습니다")
     elif fb["actual"] is None:
         lines.append(("[결과 미관측] " if fb["elapsed"] else "") + "다음 7일 안에 비교할 5km 기록이 없습니다")
         if not fb["elapsed"]:
             lines.append("아직 7일이 지나지 않았습니다")
+        info["unobserved"] = bool(fb["elapsed"])
+        summ.append(("[결과 미관측] " if fb["elapsed"] else "") + "다음 7일 안에 비교할 5km 기록이 없습니다" + ("" if fb["elapsed"] else "(아직 7일이 지나지 않았습니다)"))
         if fb["n_cands"]:
             lines.append("5.0~5.5km 기록 %d개가 있으나 5km 시간(t5_sec)이 없어 비교하지 못했습니다" % fb["n_cands"])
+            summ.append("5.0~5.5km 기록 %d개가 있으나 5km 시간(t5_sec)이 없어 비교하지 못했습니다" % fb["n_cands"])
             info["ints"].add(str(fb["n_cands"]))
     else:
         act = fb["actual"]
@@ -555,12 +561,16 @@ def format_feedback(res, fb, quantiles):
         lines.append("차이(실제 − 예측): %s초 (음수 = 예측보다 빠름)" % signed(d))
         pos = "fast" if act_s < lo_s else ("slow" if act_s > hi_s else "in")
         lines.append("명목 범위 대비 위치: " + FB_POS[pos])
+        summ.append("실제 %s 5km %s(예측 %s, 차이 %s초) · 명목 범위 대비: %s" % (date, mmss(act["t5"]), mmss(res["pred"]), signed(d), FB_POS[pos]))
+        if fb["skipped"]:
+            summ.append("이보다 먼저 뛴 5.0~5.5km 기록 %d개는 t5_sec가 없어 건너뛰었습니다" % fb["skipped"])
         info["times"] = [mmss(act["t5"]), mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"])]
         info["dates"] = date.split("-")
         info["ints"].add(str(abs(d)))
         info["d"], info["pos"] = d, pos
         if d == 0:
             lines.append("예측과 같았습니다")
+            summ.append("예측과 같았습니다")
         else:
             f = residual_cdf(d, quantiles)
             word, share = ("빨랐던", f) if d < 0 else ("느렸던", None if f is None else 100.0 - f)
@@ -570,7 +580,9 @@ def format_feedback(res, fb, quantiles):
                 share_txt = "%.1f%%" % share
                 info["share"] = share_txt.rstrip("%")
             lines.append("학습 자료에서 예측보다 %d초 이상 %s 경우: %s %s" % (abs(d), word, share_txt, FB_BASIS))
+            summ.append("학습 자료에서 예측보다 %d초 이상 %s 경우: %s %s" % (abs(d), word, share_txt, FB_BASIS))
     lines += FB_FIXED
+    info["summary"] = [FB_SUMMARY_HEAD] + [IND + t for t in summ] + [IND + " ".join(FB_FIXED)]
     return "\n".join(lines), info
 
 
@@ -774,8 +786,8 @@ def resolve(log_path, data_path, now=None, detail=False):
     return rows, format_resolve(entries, rows, sha256_file(data_path), detail)
 
 
-def run(csv_path, asof, params=None, goal=None, now=None, feedback=False, log=None, commit=None):
-    """입력 검사 → 예측 → 문구와 숫자 검사. 입력·옵션 문제는 InputProblem. 반환 (res, 출력 문구)."""
+def run_full(csv_path, asof, params=None, goal=None, now=None, feedback=False, log=None, commit=None):
+    """입력 검사 → 예측 → 문구와 숫자 검사. 입력·옵션 문제는 InputProblem. 반환 (res, 기존 전체 출력 문구). 요약 화면 도입 전의 출력이며 --detail의 '자세히 보기'와 같다."""
     params = params or load_params()
     now = time.time() if now is None else now
     asof_s = parse_asof(asof, now)
@@ -787,6 +799,8 @@ def run(csv_path, asof, params=None, goal=None, now=None, feedback=False, log=No
     parts = ["※ " + n for n in notices + res["notices"]] + [main_text]
     note_lines, matched = stratum_lines(res)
     check_stratum_lines(note_lines, matched, res)
+    P = {"input_notices": list(notices + res["notices"]), "matched": matched, "note_lines": note_lines, "goal": None, "fb": None, "core": None, "log_line": None}
+    res["_parts"] = P
     if matched:
         parts.append(WARN_TAG)              # [조건별 검증 부족: 개발 결과 기준 경고]
     parts += note_lines
@@ -796,22 +810,121 @@ def run(csv_path, asof, params=None, goal=None, now=None, feedback=False, log=No
             check_goal_numbers(g_text, info)
             parts.append("")
             parts.append(g_text)
+            P["goal"] = (g_text, info)
         else:
+            P["goal"] = "none"
             parts.append("")
             parts.append("목표 비교는 예측이 가능할 때만 표시합니다. 위 부족한 조건을 채운 뒤 다시 실행하세요.")
     if feedback:
         fb_text, fb_info = format_feedback(res, find_actual(sessions, asof_s, now), load_quantiles())
         check_feedback_numbers(fb_text, fb_info)
         res["feedback"] = fb_info
+        P["fb"] = (fb_text, fb_info)
         parts.append("")
         parts.append(fb_text)
+    P["core"] = "\n".join(parts)
     if log:
         entry = build_log_entry(csv_path, asof, asof_s, res, matched, note_lines, sessions, now, commit)
         added, n = append_log(log, entry)
         res["log_entry"] = entry
+        P["log_line"] = "예측을 저장했습니다(%d번째 줄)." % n if added else "이미 저장되어 있습니다(%d번째 줄, 같은 기준 시점·입력 파일·코드 커밋)." % n
         parts.append("")
-        parts.append("예측을 저장했습니다(%d번째 줄)." % n if added else "이미 저장되어 있습니다(%d번째 줄, 같은 기준 시점·입력 파일·코드 커밋)." % n)
+        parts.append(P["log_line"])
     return res, "\n".join(parts)
+
+
+# ---------------------------------------------------------------- 요약 화면 + 자세히 보기 (docs/demo_screen_spec.md)
+STATUS_SHORT = "[입력 부족]"
+STATUS_WARN = "[조건별 검증 부족: 개발 결과 기준 경고]"
+STATUS_UNOBS = "[결과 미관측]"
+NO_SPECIAL = "특이 조건 없음"
+CAUTION = "원인 분석·훈련 처방이 아닙니다."
+SUMMARY_TAIL = "--detail로 계산 과정과 근거 문서를 볼 수 있습니다."
+DETAIL_TAIL = "아래 자세히 보기에 계산 과정과 근거 문서가 있습니다."
+DETAIL_HEAD = "───── 자세히 보기(--detail): 기존 전체 출력 ─────"
+IND = "       "
+FB_SUMMARY_HEAD = "[뛴 다음의 피드백] 기준 시점 이후 첫 5km와 예측의 비교(다음 7일 안에 5km가 관측된 경우에 한함)"
+GOAL_SUMMARY_NO = "[목표 비교] 예측이 가능할 때만 표시합니다(위 [안내]의 부족한 조건 참고)."
+
+
+def _block(label, lines):
+    """머리표 첫 줄 + 이어지는 줄은 들여쓰기."""
+    return [label + " " + lines[0]] + [IND + l for l in lines[1:]]
+
+
+def summary_lines(res, detail=False):
+    """요약 화면(기본 출력). 계산값은 res에서만 가져온다. 보이는 순서와 묶음만 바꾼 것이다."""
+    P = res["_parts"]
+    ok = res["eligible"]
+    if ok:
+        L = _block("[결과]", ["다음 7일 안 5km 예상 기록: %s / 명목 80%% 범위 %s ~ %s" % (mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"])),
+                             "다음 7일 안 적격 5km 기록이 관측되는 경우에 대한 예측입니다(명목 80% 범위)",
+                             "실측 포함률 %s(cold-start test, 탐색 결과), 개인에게 80%%를 보장하지 않음" % cov_text(res)])
+    else:
+        L = _block("[결과]", ["예측할 수 없습니다(자격 미달)."])
+    status = []
+    if not ok:
+        status.append(STATUS_SHORT)
+    if P["matched"]:
+        status.append(STATUS_WARN)
+    if P["fb"] is not None and P["fb"][1].get("unobserved"):
+        status.append(STATUS_UNOBS)
+    L.append("[상태] " + (" ".join(status) if status else NO_SPECIAL))
+    notes = []
+    if not ok:
+        notes += ["부족한 조건: " + s for s in res["shortfalls"]]
+    else:
+        notes += ["%s: 학습 자료 교차검증 포함률 %.1f%%(%d건/%d명, 개발 결과)" % (STRATUM_RULES[(s["dim"], s["label"])][1], s["cov"], s["n"], s["users"]) for s in P["matched"]]
+        if NO_STOP_LINE in P["note_lines"]:
+            notes.append(NO_STOP_LINE[2:])
+    notes += P["input_notices"]
+    L += _block("[안내]", notes or ["조건별 안내 없음"])
+    if ok:
+        L += _block("[근거]", ["평소 %s, 직전 %s → 예상 변화 약 %s초(기본 변화량 %s초 + 평소 대비 보정 %s초)" % (mmss(res["m"]), mmss(res["ref"]), signed(res["tot_int"]), signed1(res["a_term"]), signed1(res["b_term"]))])
+    else:
+        L += _block("[근거]", ["해결: " + res["fix"]])
+    L.append("[주의] " + CAUTION + " " + (DETAIL_TAIL if detail else SUMMARY_TAIL))
+    return L
+
+
+def goal_summary_lines(goal_part):
+    """목표 비교 블록(머리표 + 핵심 2~3줄). goal_part = (전체 문구, 점검 정보) 또는 'none'(예측 없음)."""
+    if goal_part == "none":
+        return [GOAL_SUMMARY_NO]
+    text, info = goal_part
+    ls = text.split("\n")
+    head = "[목표 비교] 목표 %s: %s" % (info["goal"], info["label"])
+    return [head, IND + ls[1], IND + info["s1"]]
+
+
+def check_summary_numbers(summary, core, notes):
+    """요약 화면의 숫자 토큰이 자세히 보기(기존 전체 출력)와 stratum_notes.json의 관측 수·사용자 수에 있는 값뿐인지 검사한다."""
+    allowed = set(_TOKEN.findall(core)) | TEMPLATE_INTS | TEMPLATE_DECS
+    for s in notes:
+        allowed |= {str(s["n"]), str(s["users"])}
+    bad = [t for t in _TOKEN.findall(summary) if t not in allowed]
+    if bad:
+        raise ValueError("요약 화면에 계산값과 맞지 않는 숫자: " + ", ".join(sorted(set(bad))))
+    return True
+
+
+def run(csv_path, asof, params=None, goal=None, now=None, feedback=False, log=None, commit=None, detail=False):
+    """기본 출력 = 요약 화면(+ 목표·피드백 블록), detail=True면 뒤에 기존 전체 출력(run_full)을 그대로 붙인다. 반환 (res, 출력 문구)."""
+    res, _full = run_full(csv_path, asof, params, goal, now, feedback, log, commit)
+    P = res["_parts"]
+    out = summary_lines(res, detail)
+    if P["goal"] is not None:
+        out += [""] + goal_summary_lines(P["goal"])
+    if P["fb"] is not None:
+        out += [""] + P["fb"][1]["summary"]
+    summary = "\n".join(out)
+    check_summary_numbers(summary, P["core"], load_notes())
+    text = summary
+    if detail:
+        text += "\n\n" + DETAIL_HEAD + "\n" + P["core"]
+    if P["log_line"]:
+        text += "\n\n" + P["log_line"]
+    return res, text
 
 
 def main(argv=None):
@@ -823,7 +936,7 @@ def main(argv=None):
     ap.add_argument("--log", default=None, help="예측을 이 JSON Lines 파일에 한 줄 추가한다(저장소 밖 경로; 좌표·개별 기록 값은 저장하지 않음)")
     ap.add_argument("--resolve", default=None, help="--log로 저장한 파일의 예측을 --data CSV의 실제 결과와 연결해 요약한다")
     ap.add_argument("--data", default=None, help="--resolve에서 결과를 찾을 세션 CSV")
-    ap.add_argument("--detail", action="store_true", help="--resolve 요약에 줄별 상태(날짜·상태·공유)를 덧붙인다")
+    ap.add_argument("--detail", action="store_true", help="요약 화면 뒤에 기존 전체 출력(자세히 보기)을 붙인다. --resolve에서는 줄별 상태(날짜·상태·공유)를 덧붙인다")
     a = ap.parse_args(argv)
     if a.resolve:
         try:
@@ -842,7 +955,7 @@ def main(argv=None):
     if a.csv is None or a.asof is None:
         ap.error("세션 CSV와 --asof가 필요합니다(결과 연결은 --resolve 파일 --data CSV).")
     try:
-        _res, text = run(a.csv, a.asof, goal=a.goal, feedback=a.feedback, log=a.log)
+        _res, text = run(a.csv, a.asof, goal=a.goal, feedback=a.feedback, log=a.log, detail=a.detail)
     except InputProblem as e:
         print(problem_text(e))
         return 2

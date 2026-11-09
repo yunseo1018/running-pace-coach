@@ -55,41 +55,31 @@ def esc(s):
 
 
 def reaction(text):
-    """실행 출력에서 반응 요약 문구를 그대로 뽑는다(여러 줄은 <br>로 잇는다)."""
-    out = []
-    lines = text.split("\n")
-    first = lines[0]
+    """실행 출력(기본 출력 = 요약 화면)에서 반응 요약 문구를 그대로 뽑는다(여러 줄은 <br>로 잇는다)."""
     if text.startswith("오류:"):
-        return esc("오류 출력, 종료 코드 2: " + " / ".join(lines))
-    if "예측할 수 없습니다" in first:
-        out.append("상태 표시: [입력 부족]")
-        out.append("**예측 불가**: " + " ".join(l[2:] for l in lines if l.startswith("- ")))
-    else:
-        for l in lines:
-            if l.startswith("다음 7일 안 5km 예상 기록"):
-                out.append("예측 가능: " + l)
-    for l in lines:
-        m = re.match(r"※ 이 조건\((.+?)\)에서는 .*포함률이 ([\d.]+%)였습니다", l)
+        return esc("오류 출력, 종료 코드 2: " + " / ".join(text.split("\n")))
+    sec, buf = None, {}
+    for l in text.split("\n"):
+        m = re.match(r"\[(결과|상태|안내|근거|주의|목표 비교|뛴 다음의 피드백)\] ?(.*)", l)
         if m:
-            out.append("안내: %s (교차검증 포함률 %s)" % (m.group(1), m.group(2)))
-        elif l.startswith("※ 정지 시간 정보가 없어"):
-            out.append("안내: " + l[2:])
-        elif l.startswith("※ ") and not l.startswith("※ 이 조건") and not l.startswith("※ 위 안내"):
-            out.append("알림: " + l[2:])
-    if "예측할 수 없습니다" not in first and not any(l.startswith("※ 이 조건") for l in lines):
-        out.append("조건별 범위 안내 없음")
-    if any(l.startswith("[조건별 검증 부족") for l in lines):
-        out.append("상태 표시: [조건별 검증 부족: 개발 결과 기준 경고]")
-    for l in lines:
-        if l.startswith("목표 비교("):
-            out.append(l)
-        elif l.startswith("예측값과 목표의 차이"):
-            out.append(l)
-    if "뛴 다음의 피드백(" in text:
-        blk = text[text.index("뛴 다음의 피드백("):].split("\n")
-        for l in blk[1:]:
-            if l.startswith(("실제 기록", "이보다 먼저", "차이(", "명목 범위 대비 위치", "학습 자료에서", "다음 7일 안에 비교할", "예측이 없어")):
-                out.append("피드백: " + l)
+            sec = m.group(1)
+            buf.setdefault(sec, []).append(m.group(2))
+        elif l.startswith(" " * 7) and sec:
+            buf[sec].append(l.strip())
+        elif not l.strip():
+            sec = None
+    out = []
+    first = buf["결과"][0]
+    out.append(("**예측 불가**: " if first.startswith("예측할 수 없습니다") else "예측 가능: ") + first)
+    out.append("상태 표시: " + buf["상태"][0])
+    if first.startswith("예측할 수 없습니다"):
+        out.append("부족한 조건: " + " ".join(x[len("부족한 조건: "):] for x in buf["안내"] if x.startswith("부족한 조건: ")))
+    else:
+        out += ["안내: " + x for x in buf["안내"]]
+    if "목표 비교" in buf:
+        out.append("목표 비교: " + " / ".join(buf["목표 비교"][:2]))
+    if "뛴 다음의 피드백" in buf:
+        out += ["피드백: " + x for x in buf["뛴 다음의 피드백"][1:3]]
     return esc("<br>".join(out))
 
 
@@ -118,7 +108,7 @@ def build():
     A = L.append
     A("# 합성 예시 사례표 (시연 `demo/coach_demo.py`)")
     A("")
-    A("생성: `python demo/make_demo_cases.py`(저장소 루트). `demo/examples/`의 직접 만든 합성 예시 ①~⑰을 기준 시점 2025-03-03으로 **실제로 실행**해 프로그램 반응 칸의 문구를 그대로 옮겼다. "
+    A("생성: `python demo/make_demo_cases.py`(저장소 루트). `demo/examples/`의 직접 만든 합성 예시 ①~⑰을 기준 시점 2025-03-03으로 **실제로 실행**해 프로그램 반응 칸의 문구를 그대로 옮겼다(기본 출력인 요약 화면 기준; `--detail`은 뒤에 기존 전체 출력을 그대로 붙인다, 사양 [`demo_screen_spec.md`](demo_screen_spec.md)). "
       "다시 생성한 결과가 이 파일과 같은지는 테스트(`test_demo_cases_doc_matches_regeneration`)와 `python demo/make_demo_cases.py --check`로 확인한다. 실제 데이터와 무관하다. "
       "B2 계산식·파라미터·명목 80% 범위는 이 정리에서 바꾸지 않았다. 모든 예측은 \"다음 7일 안에 5km 기록이 관측된 경우\"에 조건부다.")
     A("")

@@ -126,8 +126,13 @@ OUTPUTS = [("ex1_steady.csv", None, "ex1_steady.out.txt"), ("ex2_slower_last.csv
 FEEDBACK_OUTPUTS = [("ex13_feedback_inside.csv", "ex13_feedback_inside.out.txt"), ("ex14_feedback_faster.csv", "ex14_feedback_faster.out.txt")]
 
 
+def full_name(out_name):
+    """요약 화면 출력 파일 이름 -> 기존 전체 출력 파일 이름(ex1_steady.out.txt -> ex1_steady.full.txt)."""
+    return out_name.replace(".out.txt", ".full.txt")
+
+
 def write_outputs():
-    """예시 CSV로 coach_demo를 실행해 출력 파일(.out.txt)을 만든다(명령줄 실행과 같은 출력)."""
+    """예시 CSV로 coach_demo를 실행해 출력 파일을 만든다: .out.txt = 명령줄 기본 출력(요약 화면), .full.txt = 기존 전체 출력(run_full; --detail의 자세히 보기)."""
     import contextlib
     import io
     import sys
@@ -140,12 +145,16 @@ def write_outputs():
             code = coach_demo.main(argv)
         assert code == 0, (csv_name, goal, code)
         (OUT / out_name).write_text(buf.getvalue(), encoding="utf-8", newline="\n")
+        _res, full = coach_demo.run_full(str(OUT / csv_name), ASOF_TEXT, goal=goal)                    # 요약 화면 도입 전의 전체 출력(--detail의 자세히 보기와 같음)
+        (OUT / full_name(out_name)).write_text(full + "\n", encoding="utf-8", newline="\n")
     for csv_name, out_name in FEEDBACK_OUTPUTS:
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             code = coach_demo.main([str(OUT / csv_name), "--asof", ASOF_TEXT, "--feedback"])
         assert code == 0, (csv_name, code)
         (OUT / out_name).write_text(buf.getvalue(), encoding="utf-8", newline="\n")
+        _res, full = coach_demo.run_full(str(OUT / csv_name), ASOF_TEXT, feedback=True)
+        (OUT / full_name(out_name)).write_text(full + "\n", encoding="utf-8", newline="\n")
     print("saved outputs", [o for _c, _g, o in OUTPUTS] +[o for _c, o in FEEDBACK_OUTPUTS])
 
 

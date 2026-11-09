@@ -280,10 +280,10 @@ def _csv_stop(tmp, rows, name="st.csv"):
 def test_run_prints_notices_before_prediction_and_no_notice_when_clean():
     with tempfile.TemporaryDirectory() as tmp:
         path = _csv_stop(tmp, _rows_clean())
-        _res, clean = cd.run(path, str(ASOF), P, now=NOW)
+        _res, clean = cd.run_full(path, str(ASOF), P, now=NOW)
         assert "※" not in clean and clean.startswith("다음 7일 안 5km 예상 기록")       # 안내 줄이 하나도 없다
         rows = _rows_clean()
-        _res, noisy = cd.run(_csv_stop(tmp, rows + [rows[0]], "dup.csv"), str(ASOF), P, now=NOW)
+        _res, noisy = cd.run_full(_csv_stop(tmp, rows + [rows[0]], "dup.csv"), str(ASOF), P, now=NOW)
         assert noisy.startswith("※ ") and noisy.endswith(clean)           # 안내만 앞에 붙고 예측 문구는 같다
 
 
@@ -372,19 +372,19 @@ def test_goal_numbers_check_catches_altered_numbers():
 def test_run_without_goal_is_unchanged_and_with_goal_only_appends():
     with tempfile.TemporaryDirectory() as tmp:
         path = _csv(tmp, _rows_ok())
-        _r0, plain = cd.run(path, str(ASOF), P, now=NOW)
-        _r1, none_goal = cd.run(path, str(ASOF), P, goal=None, now=NOW)
+        _r0, plain = cd.run_full(path, str(ASOF), P, now=NOW)
+        _r1, none_goal = cd.run_full(path, str(ASOF), P, goal=None, now=NOW)
         assert plain == none_goal and "목표 비교" not in plain
-        _r2, with_goal = cd.run(path, str(ASOF), P, goal="24:00", now=NOW)
+        _r2, with_goal = cd.run_full(path, str(ASOF), P, goal="24:00", now=NOW)
         assert with_goal.startswith(plain + "\n") and "목표 비교(목표 24:00)" in with_goal
 
 
 def test_goal_with_ineligible_input_and_goal_errors_do_not_crash():
     with tempfile.TemporaryDirectory() as tmp:
         short = _csv(tmp, [(ASOF - cd.DAY - 1800, ASOF - cd.DAY, 3.0, None)])
-        _r, text = cd.run(short, str(ASOF), P, goal="24:00", now=NOW)
+        _r, text = cd.run_full(short, str(ASOF), P, goal="24:00", now=NOW)
         assert "예측할 수 없습니다" in text and "목표 비교는 예측이 가능할 때만 표시합니다" in text and "명목 범위" not in text
-        e = _problem(cd.run, _csv(tmp, _rows_ok(), "g.csv"), str(ASOF), P, goal="9:00", now=NOW)
+        e = _problem(cd.run_full, _csv(tmp, _rows_ok(), "g.csv"), str(ASOF), P, goal="9:00", now=NOW)
         assert "10분 미만" in e.reason
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -529,45 +529,24 @@ def test_stratum_notes_do_not_change_prediction_or_range():
 
 def test_stop_sec_column_is_optional_and_validated():
     with tempfile.TemporaryDirectory() as tmp:
-        _r, text = cd.run(_csv(tmp, _rows_ok()), str(ASOF), P, now=NOW)         # 열 없음: 기존 CSV 그대로 동작
+        _r, text = cd.run_full(_csv(tmp, _rows_ok()), str(ASOF), P, now=NOW)         # 열 없음: 기존 CSV 그대로 동작
         assert cd.NO_STOP_LINE in text and text.index(cd.NO_STOP_LINE) > text.index("다음 7일 안 5km 예상 기록")
         for bad in ["abc", "-5"]:
             rows = _rows_clean()
             p = _csv_stop(tmp, rows[:-1] + [rows[-1][:4] + (bad,)], "bad.csv")
-            e = _problem(cd.run, p, str(ASOF), P, now=NOW)
+            e = _problem(cd.run_full, p, str(ASOF), P, now=NOW)
             assert "stop_sec" in e.reason and "0 이상" in e.reason
-        _r, with_blank = cd.run(_csv_stop(tmp, [r[:4] + (None,) for r in _rows_clean()], "blank.csv"), str(ASOF), P, now=NOW)
+        _r, with_blank = cd.run_full(_csv_stop(tmp, [r[:4] + (None,) for r in _rows_clean()], "blank.csv"), str(ASOF), P, now=NOW)
         assert with_blank.endswith(cd.NO_STOP_LINE)                              # 열은 있으나 기준 기록의 값이 비어 있음
 
 
 def test_notes_come_after_prediction_before_goal_and_goal_block_unchanged():
     with tempfile.TemporaryDirectory() as tmp:
         path = _csv_stop(tmp, [r[:4] + (900,) if r[3] else r for r in _rows_clean()])
-        _r, plain = cd.run(path, str(ASOF), P, now=NOW)
-        _r, goal = cd.run(path, str(ASOF), P, goal="24:00", now=NOW)
+        _r, plain = cd.run_full(path, str(ASOF), P, now=NOW)
+        _r, goal = cd.run_full(path, str(ASOF), P, goal="24:00", now=NOW)
         assert plain.index("이 예측은 원인 분석이 아니며") < plain.index("※ 이 조건") and plain.endswith(cd.WIDTH_LINE)
         assert goal.startswith(plain + "\n") and "목표 비교(목표 24:00)" in goal and goal.index("※ 이 조건") < goal.index("목표 비교(")
-
-
-def test_example_outputs_match_live_runs_and_cover_each_stratum():
-    import make_examples as mx
-    ex = Path(mx.OUT)
-    seen = {}
-    for csv_name, goal, out_name in mx.OUTPUTS:
-        argv = [str(ex / csv_name), "--asof", mx.ASOF_TEXT] + (["--goal", goal] if goal else [])
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            assert cd.main(argv) == 0
-        assert (ex / out_name).read_text(encoding="utf-8") == buf.getvalue(), out_name
-        seen[out_name] = buf.getvalue()
-    keys = {"ex5_past1.out.txt": "직전 기록 1개뿐", "ex6_past3.out.txt": "2~4개뿐", "ex7_far_from_usual.out.txt": "2분 넘게", "ex8_long_stop.out.txt": "5분 넘는 정지"}
-    for name, frag in keys.items():
-        assert frag in seen[name] and cd.WIDTH_LINE in seen[name], name
-    assert "※" not in seen["ex9_no_note.out.txt"]                                # 안내 줄이 하나도 없다
-    assert "※ 이 조건" in seen["ex1_steady.out.txt"] and cd.NO_STOP_LINE in seen["ex1_steady.out.txt"]
-    assert "평소 쪽으로 +5.5초 움직였지만" in seen["ex11_trend_smaller_a.out.txt"] and "직전 기록보다 10초 빠릅니다" in seen["ex11_trend_smaller_a.out.txt"]
-    assert "직전 기록보다" in seen["ex12_trend_larger_a.out.txt"] and "느립니다(평소 쪽)" in seen["ex12_trend_larger_a.out.txt"]
-    assert "※ 이 조건" in seen["ex10_multi.out.txt"] and seen["ex10_multi.out.txt"].count("※ 이 조건") == 3
 
 
 def test_avg_hr_column_is_optional_and_does_not_change_prediction():
@@ -579,8 +558,8 @@ def test_avg_hr_column_is_optional_and_does_not_change_prediction():
         p_no = _write(tmp, "no_hr.csv", chr(10).join(no_hr))
         blank = [text[0]] + [",".join("" if i == 4 else c for i, c in enumerate(l.split(","))) for l in text[1:] if l]
         p_blank = _write(tmp, "blank_hr.csv", chr(10).join(blank) + chr(10))
-        t0 = cd.run(with_hr, str(ASOF), P, now=NOW)[1]
-        assert cd.run(p_no, str(ASOF), P, now=NOW)[1] == t0 and cd.run(p_blank, str(ASOF), P, now=NOW)[1] == t0
+        t0 = cd.run_full(with_hr, str(ASOF), P, now=NOW)[1]
+        assert cd.run_full(p_no, str(ASOF), P, now=NOW)[1] == t0 and cd.run_full(p_blank, str(ASOF), P, now=NOW)[1] == t0
 
 
 # ---------------------------------------------------------------- 뛴 다음의 피드백 (docs/demo_feedback_spec.md)
@@ -597,7 +576,7 @@ def _after(days, km, t5, hours=0):
 
 def _fb(tmp, extra, now=NOW, name="fb.csv", rows=None):
     path = _csv(tmp, (_rows_ok() if rows is None else rows) + list(extra), name)
-    res, text = cd.run(path, str(ASOF), P, now=now, feedback=True)
+    res, text = cd.run_full(path, str(ASOF), P, now=now, feedback=True)
     return res, text, text[text.index("뛴 다음의 피드백("):]
 
 
@@ -722,13 +701,13 @@ def test_feedback_has_no_forbidden_expressions():
 def test_without_feedback_flag_output_is_unchanged():
     with tempfile.TemporaryDirectory() as tmp:
         path = _csv(tmp, _rows_ok([_after(2, 5.2, 1500.0)]))
-        res0, plain = cd.run(path, str(ASOF), P, now=NOW)
-        res1, with_fb = cd.run(path, str(ASOF), P, now=NOW, feedback=True)
+        res0, plain = cd.run_full(path, str(ASOF), P, now=NOW)
+        res1, with_fb = cd.run_full(path, str(ASOF), P, now=NOW, feedback=True)
         assert "뛴 다음의 피드백" not in plain and "feedback" not in res0
         assert with_fb.startswith(plain + "\n\n뛴 다음의 피드백(") and with_fb.count("뛴 다음의 피드백(") == 1
         for k in ("pred", "lo", "hi", "y_hat", "ref", "m"):                                  # 예측·범위는 피드백 유무와 무관
             assert res0[k] == res1[k]
-        _r, goal_fb = cd.run(path, str(ASOF), P, goal="24:00", now=NOW, feedback=True)         # 목표 비교 블록 뒤에 붙는다
+        _r, goal_fb = cd.run_full(path, str(ASOF), P, goal="24:00", now=NOW, feedback=True)         # 목표 비교 블록 뒤에 붙는다
         assert goal_fb.index("목표 비교(") < goal_fb.index("뛴 다음의 피드백(")
 
 
@@ -743,22 +722,6 @@ def test_feedback_number_check_catches_mismatch():
             except ValueError:
                 continue
             raise AssertionError("검사를 통과함: " + old)
-
-
-def test_feedback_example_outputs_match_live_runs():
-    import make_examples as mx
-    ex = Path(mx.OUT)
-    for csv_name, out_name in mx.FEEDBACK_OUTPUTS:
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            assert cd.main([str(ex / csv_name), "--asof", mx.ASOF_TEXT, "--feedback"]) == 0
-        text = buf.getvalue()
-        assert (ex / out_name).read_text(encoding="utf-8") == text, out_name
-        plain = io.StringIO()
-        with contextlib.redirect_stdout(plain):
-            cd.main([str(ex / csv_name), "--asof", mx.ASOF_TEXT])
-        assert text.startswith(plain.getvalue().rstrip("\n") + "\n\n뛴 다음의 피드백(")          # 예측 부분은 --feedback 없는 출력과 같다
-    assert "범위 안" in (ex / mx.FEEDBACK_OUTPUTS[0][1]).read_text(encoding="utf-8") and "범위보다 빠름" in (ex / mx.FEEDBACK_OUTPUTS[1][1]).read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- 사례표 docs/demo_cases.md
@@ -832,13 +795,13 @@ def _entry(asof_epoch, status="예측", lo=1285, hi=1765, kind="후향 점검"):
 
 def test_status_tags_input_short_warning_and_unobserved():
     with tempfile.TemporaryDirectory() as tmp:
-        _r, text = cd.run(_csv(tmp, [(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)]), str(ASOF), P, now=NOW)
+        _r, text = cd.run_full(_csv(tmp, [(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)]), str(ASOF), P, now=NOW)
         assert text.startswith("[입력 부족] 예측할 수 없습니다. 부족한 조건:")
-        _r, warn = cd.run(_csv(tmp, _rows_ok(), "w.csv"), str(ASOF), P, now=NOW)                              # 과거 5km 1개 -> 조건별 안내
+        _r, warn = cd.run_full(_csv(tmp, _rows_ok(), "w.csv"), str(ASOF), P, now=NOW)                              # 과거 5km 1개 -> 조건별 안내
         lines = warn.split("\n")
         i = lines.index(cd.WARN_TAG)
         assert lines[i + 1].startswith("※ 이 조건(") and "[조건별 검증 부족: 개발 결과 기준 경고]" in cd.WARN_TAG and "새 자료로 확인되지 않았습니다" in cd.WARN_TAG
-        _r, clean = cd.run(_csv_stop(tmp, _rows_clean(), "c.csv"), str(ASOF), P, now=NOW)
+        _r, clean = cd.run_full(_csv_stop(tmp, _rows_clean(), "c.csv"), str(ASOF), P, now=NOW)
         assert "[조건별 검증 부족" not in clean and "[입력 부족]" not in clean and "[결과 미관측]" not in clean
         _r, _t, none_el = _fb(tmp, [], now=NOW)                                                              # 7일 지남 + 기록 없음
         assert none_el.split("\n")[1].startswith("[결과 미관측] 다음 7일 안에 비교할 5km 기록이 없습니다")
@@ -850,7 +813,7 @@ def test_status_tags_input_short_warning_and_unobserved():
 
 def test_screen_first_lines_show_observation_condition_and_cold_start_coverage_only():
     with tempfile.TemporaryDirectory() as tmp:
-        res, text = cd.run(_csv(tmp, _rows_ok(), "s.csv"), str(ASOF), P, now=NOW)
+        res, text = cd.run_full(_csv(tmp, _rows_ok(), "s.csv"), str(ASOF), P, now=NOW)
         lines = text.split("\n")
         assert lines[0].startswith("다음 7일 안 5km 예상 기록: ") and lines[1] == "다음 7일 안 적격 5km 기록이 관측되는 경우에 대한 예측입니다(명목 80% 범위)"
         assert lines[2] == "실측 포함률 73.9%(cold-start test, 탐색 결과), 개인에게 80%를 보장하지 않음" and "personalized" not in text and "77.8" not in text
@@ -861,7 +824,7 @@ def test_log_entry_fields_hashes_and_no_coordinates():
     with tempfile.TemporaryDirectory() as tmp:
         csvp = _csv(tmp, _rows_ok(), "in.csv")
         logp = str(Path(tmp) / "pred.jsonl")
-        res, text = cd.run(csvp, str(ASOF), P, now=NOW, log=logp, commit=("abc123", False))
+        res, text = cd.run_full(csvp, str(ASOF), P, now=NOW, log=logp, commit=("abc123", False))
         assert text.endswith("예측을 저장했습니다(1번째 줄).")
         raw = Path(logp).read_text(encoding="utf-8")
         assert raw.count("\n") == 1
@@ -882,15 +845,15 @@ def test_log_duplicate_skipped_inside_repo_rejected_and_input_short_status():
     with tempfile.TemporaryDirectory() as tmp:
         csvp = _csv(tmp, _rows_ok(), "in.csv")
         logp = str(Path(tmp) / "p.jsonl")
-        cd.run(csvp, str(ASOF), P, now=NOW, log=logp, commit=("c1", False))
-        _r, again = cd.run(csvp, str(ASOF), P, now=NOW, log=logp, commit=("c1", False))
+        cd.run_full(csvp, str(ASOF), P, now=NOW, log=logp, commit=("c1", False))
+        _r, again = cd.run_full(csvp, str(ASOF), P, now=NOW, log=logp, commit=("c1", False))
         assert again.endswith("이미 저장되어 있습니다(1번째 줄, 같은 기준 시점·입력 파일·코드 커밋).") and len(Path(logp).read_text(encoding="utf-8").splitlines()) == 1
-        _r, other = cd.run(csvp, str(ASOF), P, now=NOW, log=logp, commit=("c2", True))                    # 코드 커밋이 다르면 별도 줄
+        _r, other = cd.run_full(csvp, str(ASOF), P, now=NOW, log=logp, commit=("c2", True))                    # 코드 커밋이 다르면 별도 줄
         assert other.endswith("예측을 저장했습니다(2번째 줄).") and len(Path(logp).read_text(encoding="utf-8").splitlines()) == 2
-        e = _problem(cd.run, csvp, str(ASOF), P, now=NOW, log=str(cd.REPO / "demo" / "should_not_exist.mine.jsonl"), commit=("c", False))
+        e = _problem(cd.run_full, csvp, str(ASOF), P, now=NOW, log=str(cd.REPO / "demo" / "should_not_exist.mine.jsonl"), commit=("c", False))
         assert "저장소 폴더 안" in e.reason and not (cd.REPO / "demo" / "should_not_exist.mine.jsonl").exists()
         short = _csv(tmp, [(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)], "short.csv")
-        cd.run(short, str(ASOF), P, now=NOW, log=logp, commit=("c1", False))
+        cd.run_full(short, str(ASOF), P, now=NOW, log=logp, commit=("c1", False))
         last = _json.loads(Path(logp).read_text(encoding="utf-8").splitlines()[-1])
         assert last["status"] == "입력 부족" and last["pred_sec"] is None and last["range_lo_sec"] is None and last["notices"] == []
 
@@ -898,8 +861,8 @@ def test_log_duplicate_skipped_inside_repo_rejected_and_input_short_status():
 def test_log_kind_prospective_vs_retrospective_and_notice_kinds():
     with tempfile.TemporaryDirectory() as tmp:
         logp = str(Path(tmp) / "k.jsonl")
-        cd.run(_csv(tmp, _rows_ok(), "a.csv"), str(ASOF), P, now=NOW, log=logp, commit=("c", False))
-        cd.run(_csv(tmp, _rows_ok([_after(2, 5.2, 1500.0), _after(4, 3.0, None)]), "b.csv"), str(ASOF), P, now=NOW, log=logp, commit=("c", False))
+        cd.run_full(_csv(tmp, _rows_ok(), "a.csv"), str(ASOF), P, now=NOW, log=logp, commit=("c", False))
+        cd.run_full(_csv(tmp, _rows_ok([_after(2, 5.2, 1500.0), _after(4, 3.0, None)]), "b.csv"), str(ASOF), P, now=NOW, log=logp, commit=("c", False))
         e1, e2 = (_json.loads(l) for l in Path(logp).read_text(encoding="utf-8").splitlines())
         assert (e1["kind"], e1["n_later_sessions"]) == ("전향", 0) and (e2["kind"], e2["n_later_sessions"]) == ("후향 점검", 2)
         assert (e1["pred_sec"], e1["range_lo_sec"], e1["range_hi_sec"]) == (e2["pred_sec"], e2["range_lo_sec"], e2["range_hi_sec"])   # 예측은 asof 이전 기록만 사용
@@ -992,6 +955,171 @@ def test_resolve_cli_errors_and_end_to_end_log_then_resolve():
         with contextlib.redirect_stdout(buf):
             assert cd.main([data, "--asof", str(ASOF)]) == 0                                             # --log가 없으면 저장하지 않는다
         assert "저장" not in buf.getvalue()
+
+
+# ---------------------------------------------------------------- 요약 화면 + 자세히 보기 (docs/demo_screen_spec.md)
+def _example_cases():
+    """(CSV 이름, 목표, 피드백 여부, 요약 출력 파일 이름) 전체 목록."""
+    import make_examples as mx
+    return [(c, g, False, o) for c, g, o in mx.OUTPUTS] + [(c, None, True, o) for c, o in mx.FEEDBACK_OUTPUTS]
+
+
+def _cli_text(argv):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        assert cd.main(argv) == 0
+    return buf.getvalue()
+
+
+def _example_argv(csv_name, goal, fb, extra=()):
+    import make_examples as mx
+    return [str(Path(mx.OUT) / csv_name), "--asof", mx.ASOF_TEXT] + (["--goal", goal] if goal else []) + (["--feedback"] if fb else []) + list(extra)
+
+
+def test_example_outputs_match_live_runs_and_cover_each_stratum():
+    import make_examples as mx
+    ex = Path(mx.OUT)
+    seen, full = {}, {}
+    for csv_name, goal, fb, out_name in _example_cases():
+        text = _cli_text(_example_argv(csv_name, goal, fb))
+        assert (ex / out_name).read_text(encoding="utf-8") == text, out_name                               # 요약 화면 = 기본 출력
+        _r, legacy = cd.run_full(str(ex / csv_name), mx.ASOF_TEXT, goal=goal, feedback=fb)
+        assert (ex / mx.full_name(out_name)).read_text(encoding="utf-8") == legacy + "\n", out_name        # 기존 전체 출력은 그대로
+        seen[out_name], full[out_name] = text, legacy
+    keys = {"ex5_past1.out.txt": "직전 기록 1개뿐", "ex6_past3.out.txt": "2~4개뿐", "ex7_far_from_usual.out.txt": "2분 넘게", "ex8_long_stop.out.txt": "5분 넘는 정지"}
+    for name, frag in keys.items():
+        assert frag in seen[name] and "학습 자료 교차검증 포함률" in seen[name] and cd.WIDTH_LINE in full[name], name
+    assert "[상태] 특이 조건 없음" in seen["ex9_no_note.out.txt"] and "[안내] 조건별 안내 없음" in seen["ex9_no_note.out.txt"] and "※" not in full["ex9_no_note.out.txt"]
+    assert cd.NO_STOP_LINE[2:] in seen["ex1_steady.out.txt"] and "과거 유효 5km가 2~4개뿐" in seen["ex1_steady.out.txt"]
+    assert "평소 쪽으로 +5.5초 움직였지만" in full["ex11_trend_smaller_a.out.txt"] and "직전 기록보다 10초 빠릅니다" in full["ex11_trend_smaller_a.out.txt"]
+    assert "직전 기록보다" in full["ex12_trend_larger_a.out.txt"] and "느립니다(평소 쪽)" in full["ex12_trend_larger_a.out.txt"]
+    assert seen["ex10_multi.out.txt"].count("학습 자료 교차검증 포함률") == 3
+
+
+def test_feedback_example_outputs_match_live_runs():
+    import make_examples as mx
+    ex = Path(mx.OUT)
+    for csv_name, out_name in mx.FEEDBACK_OUTPUTS:
+        text = _cli_text([str(ex / csv_name), "--asof", mx.ASOF_TEXT, "--feedback"])
+        assert (ex / out_name).read_text(encoding="utf-8") == text, out_name
+        plain = _cli_text([str(ex / csv_name), "--asof", mx.ASOF_TEXT])
+        assert text.startswith(plain.rstrip("\n") + "\n\n[뛴 다음의 피드백]")          # 요약 화면 부분은 --feedback 없는 출력과 같다
+    assert "범위 안" in (ex / mx.FEEDBACK_OUTPUTS[0][1]).read_text(encoding="utf-8") and "범위보다 빠름" in (ex / mx.FEEDBACK_OUTPUTS[1][1]).read_text(encoding="utf-8")
+
+
+def test_summary_keeps_required_phrases_status_and_line_budget():
+    import make_examples as mx
+    for csv_name, goal, fb, out_name in _example_cases():
+        res, text = cd.run(str(Path(mx.OUT) / csv_name), mx.ASOF_TEXT, goal=goal, feedback=fb)
+        base = text.split("\n\n")[0].split("\n")
+        assert len(base) <= 12, (out_name, len(base))                                                    # 기본 요약은 10줄 안팎
+        labels = [l.split(" ")[0] for l in base if l.startswith("[")]
+        assert labels == ["[결과]", "[상태]", "[안내]", "[근거]", "[주의]"], (out_name, labels)
+        status = [l for l in base if l.startswith("[상태]")][0]
+        assert "원인 분석·훈련 처방이 아닙니다" in text and "[상태]" in text
+        if res["eligible"]:
+            for frag in ("다음 7일 안 적격 5km 기록이 관측되는 경우에 대한 예측", "명목 80% 범위", "실측 포함률 75.3%(cold-start test, 탐색 결과)", "개인에게 80%를 보장하지 않음"):
+                assert frag in text, (out_name, frag)
+            assert (cd.STATUS_WARN in status) == bool(res["_parts"]["matched"])
+            assert cd.STATUS_SHORT not in status
+        else:
+            assert cd.STATUS_SHORT in status and "예측할 수 없습니다" in base[0]
+        if not res["_parts"]["matched"] and res["eligible"] and not (fb and res["_parts"]["fb"][1]["unobserved"]):
+            assert status == "[상태] " + cd.NO_SPECIAL
+        assert "personalized" not in text and "77.8" not in text
+        if goal:
+            assert "달성 확률이나 달성 가능 여부를 뜻하지 않으며, 훈련 처방을 제공하지 않습니다" in text and "[목표 비교] 목표 " in text
+        if fb:
+            assert all(f in text for f in cd.FB_FIXED) and "[뛴 다음의 피드백]" in text
+
+
+def test_detail_shows_every_legacy_line_unchanged():
+    import make_examples as mx
+    for csv_name, goal, fb, out_name in _example_cases():
+        ex = Path(mx.OUT)
+        legacy = (ex / mx.full_name(out_name)).read_text(encoding="utf-8")                              # 요약 도입 직전의 출력(고정 파일)
+        summary = (ex / out_name).read_text(encoding="utf-8")
+        detail = _cli_text(_example_argv(csv_name, goal, fb, ["--detail"]))
+        lines = detail.split("\n")
+        missing = [l for l in legacy.split("\n") if l.strip() and l not in lines]
+        assert not missing, (out_name, missing[:2])                                                     # 기존 출력의 어떤 줄도 빠지지 않는다
+        assert cd.DETAIL_HEAD in lines and legacy.split("\n")[0] in detail.split(cd.DETAIL_HEAD)[1]
+        assert lines[0] == summary.split("\n")[0] and cd.DETAIL_TAIL in detail and cd.SUMMARY_TAIL not in detail
+        assert detail.split(cd.DETAIL_HEAD + "\n")[1].rstrip("\n") == legacy.rstrip("\n")             # 자세히 보기 본문 = 기존 전체 출력
+        assert len(lines) > len(summary.split("\n"))
+
+
+def test_summary_notice_line_has_coverage_counts_and_development_label():
+    import make_examples as mx
+    t = _cli_text([str(Path(mx.OUT) / "ex7_far_from_usual.csv"), "--asof", mx.ASOF_TEXT])
+    n = [s for s in cd.load_notes() if s["dim"] == "b"][0]
+    assert ("직전 기록이 평소와 2분 넘게 차이: 학습 자료 교차검증 포함률 %.1f%%(%d건/%d명, 개발 결과)" % (n["cov"], n["n"], n["users"])) in t
+    assert "556건/180명" in t and "[상태] [조건별 검증 부족: 개발 결과 기준 경고]" in t
+
+
+def test_summary_status_variants_and_unobserved_with_feedback():
+    with tempfile.TemporaryDirectory() as tmp:
+        _r, short = cd.run(_csv(tmp, [(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)]), str(ASOF), P, now=NOW)
+        assert "[상태] [입력 부족]" in short and "[안내] 부족한 조건:" in short and "[근거] 해결:" in short and "예측할 수 없습니다" in short
+        _r, warn = cd.run(_csv(tmp, _rows_ok(), "w.csv"), str(ASOF), P, now=NOW)
+        assert "[상태] [조건별 검증 부족: 개발 결과 기준 경고]" in warn and "과거 유효 5km가 직전 기록 1개뿐: 학습 자료 교차검증 포함률 70.6%(109건/109명, 개발 결과)" in warn
+        _r, clean = cd.run(_csv_stop(tmp, _rows_clean(), "c.csv"), str(ASOF), P, now=NOW)
+        assert "[상태] 특이 조건 없음" in clean and "[안내] 조건별 안내 없음" in clean
+        _r, unobs = cd.run(_csv_stop(tmp, _rows_clean(), "c2.csv"), str(ASOF), P, now=NOW, feedback=True)               # 7일 지남 + 적격 기록 없음
+        assert "[상태] [결과 미관측]" in unobs and "[결과 미관측] 다음 7일 안에 비교할 5km 기록이 없습니다" in unobs
+        _r, wait = cd.run(_csv_stop(tmp, _rows_clean(), "c3.csv"), str(ASOF), P, now=ASOF + 3 * cd.DAY, feedback=True)  # 7일 미경과: 미관측 아님
+        assert "[상태] 특이 조건 없음" in wait and "(아직 7일이 지나지 않았습니다)" in wait
+        _r, both = cd.run(_csv(tmp, _rows_ok(), "b.csv"), str(ASOF), P, now=NOW, feedback=True)
+        assert "[상태] [조건별 검증 부족: 개발 결과 기준 경고] [결과 미관측]" in both
+        _r, sg = cd.run(_csv(tmp, [(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)], "g.csv"), str(ASOF), P, now=NOW, goal="24:00", feedback=True)
+        assert "[목표 비교] 예측이 가능할 때만 표시합니다" in sg and "[입력 부족] 예측이 없어 비교하지 않습니다" in sg
+
+
+def test_summary_numbers_are_checked_against_full_output():
+    with tempfile.TemporaryDirectory() as tmp:
+        res, text = cd.run(_csv(tmp, _rows_ok(), "n.csv"), str(ASOF), P, now=NOW)
+        P_ = res["_parts"]
+        assert cd.check_summary_numbers(text, P_["core"], cd.load_notes())
+        for old, new in (("24:45", "24:46"), ("73.9%", "74.9%"), ("109건", "110건")):
+            try:
+                cd.check_summary_numbers(text.replace(old, new), P_["core"], cd.load_notes())
+            except ValueError:
+                continue
+            if old in text:
+                raise AssertionError("검사를 통과함: " + old)
+
+
+def test_summary_has_no_forbidden_expressions_outside_negated_sentences():
+    import make_examples as mx
+    skip = ("[주의]", "달성 확률이나 달성 가능 여부를 뜻하지 않으며", "[근거] 해결:")                           # '원인·처방 아님'을 알리는 부정 문장(필수 문구)과 입력 부족의 해결 안내(기존 문구)
+    for csv_name, goal, fb, out_name in _example_cases():
+        text = (Path(mx.OUT) / out_name).read_text(encoding="utf-8")
+        for l in text.split("\n"):
+            if any(a in l for a in skip):
+                continue
+            bad = [w for w in FB_FORBIDDEN if w in l]
+            assert not bad, (out_name, bad, l)
+
+
+def test_log_line_stays_last_with_summary_and_detail():
+    with tempfile.TemporaryDirectory() as tmp:
+        csvp = _csv(tmp, _rows_ok(), "in.csv")
+        _r, text = cd.run(csvp, str(ASOF), P, now=NOW, log=str(Path(tmp) / "p.jsonl"), commit=("c", False))
+        assert text.endswith("예측을 저장했습니다(1번째 줄).") and text.index("[주의]") < text.index("예측을 저장했습니다")
+        _r, det = cd.run(csvp, str(ASOF), P, now=NOW, log=str(Path(tmp) / "p2.jsonl"), commit=("c", False), detail=True)
+        assert det.endswith("예측을 저장했습니다(1번째 줄).") and det.count("예측을 저장했습니다") == 1
+
+
+def test_screen_spec_example_blocks_match_live_example_1():
+    doc = (Path(cd.REPO) / "docs" / "demo_screen_spec.md").read_text(encoding="utf-8")
+    import make_examples as mx
+    ex = Path(mx.OUT)
+    nl = chr(10)
+    blocks = [b.split(nl + "```")[0] for b in doc.split("```text" + nl)[1:]]
+    assert blocks[0] == (ex / "ex1_steady.full.txt").read_text(encoding="utf-8").rstrip(nl)
+    assert blocks[1] == _cli_text(_example_argv("ex1_steady.csv", None, False)).rstrip(nl)
+    for frag in ("다음 7일 안 적격 5km 기록이 관측되는 경우에 대한 예측", "실측 포함률 75.3%(cold-start test, 탐색 결과)", "개인에게 80%를 보장하지 않음", "원인 분석·훈련 처방이 아닙니다", "[상태]"):
+        assert frag in doc                       # 사양의 필수 문구 목록이 코드와 같은 문구를 쓴다
 
 
 if __name__ == "__main__":

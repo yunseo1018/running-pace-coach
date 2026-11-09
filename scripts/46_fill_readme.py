@@ -68,9 +68,9 @@ for f, title, goal in ex:
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True)
     out = r.stdout.strip()
     if goal == "FB":                            # 피드백 블록은 예측 출력(--feedback 없는 출력과 같음) 뒤에 이어지는 부분만 싣는다
-        out = out[out.index("뛴 다음의 피드백("):]
+        out = out[out.index("[뛴 다음의 피드백]"):]
     elif goal:                                  # 목표 비교는 ①의 예측 출력 뒤에 이어지는 부분만 싣는다
-        out = out[out.index("목표 비교("):]
+        out = out[out.index("[목표 비교]"):]
     demo_blocks.append((f, title, out, goal))
 
 # ---- 포함률·성능
@@ -121,6 +121,7 @@ A("python demo/coach_demo.py demo/examples/ex13_feedback_inside.csv --asof 2025-
 A("python demo/coach_demo.py <CSV> --asof 2025-03-03T00:00:00 --log <저장소 밖 폴더>/predictions.mine.jsonl   # 예측 저장(JSON Lines 한 줄 추가)")
 A("python demo/coach_demo.py --resolve <저장소 밖 폴더>/predictions.mine.jsonl --data <CSV>   # 저장된 예측과 실제 결과 연결 요약")
 A("python demo/make_feedback_quantiles.py  # feedback_quantiles.json 재생성(로컬 data/ 필요; 다시 실행해 git diff가 비면 재생성 확인)")
+A("python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00 --detail   # 요약 화면 + 자세히 보기(기존 전체 출력)")
 A("python demo/make_stratum_notes.py       # stratum_notes.json 재생성(docs/b2_failure_5km.md의 train 폴드 밖 행만 읽음)")
 A("python demo/make_b2_params.py           # b2_params.json과 docs/demo_interval_check.md 재생성(로컬 data/ 필요)")
 A("python demo/bench_demo.py               # docs/demo_performance.md 재생성")
@@ -144,6 +145,7 @@ A("  2. `python demo/import_apple_health.py --zip <저장소 밖 폴더>/my_runs
 A("  3. `python demo/coach_demo.py <저장소 밖 폴더>/my_runs/runs.mine.csv --asof 2025-10-20T00:00:00` (+ 선택 `--goal 24:00`)")
 A("  - 시각은 +0900 표기를 바꾸지 않고 현지 벽시계 그대로(시간대 표기 없이) 적으므로 `--asof`도 한국 시각으로 지정한다. `avg_hr`는 선택 열이고 예측에 쓰지 않는다. 좌표는 어디에도 저장·출력하지 않는다. t5는 연구 파이프라인 함수(`38_build_5km_dataset.compute_t5`)를 그대로 불러 쓰므로 numpy/pandas가 필요하다. 판정 기준은 연구 데이터와 맞춘다([`docs/import_alignment_spec.md`](docs/import_alignment_spec.md)): 경로(GPX)가 있는 기록은 시작·종료 시각과 경과 시간을 GPX 점 시각으로, 거리를 GPX haversine 재계산(건강 앱 거리는 `distance_km_health`, 출처는 `distance_src`)으로 정하고 5.0~5.5km 판정도 그 거리 기준이다. 경로가 없으면 종료 시각 = 시작 + Workout `duration` 속성, 거리 = 건강 앱 거리다.")
 A("- **`--feedback`**(사양 [`docs/demo_feedback_spec.md`](docs/demo_feedback_spec.md)): 기준 시점(`--asof`) 이후 7일 안에 시작한 5.0~5.5km 달리기 중 `t5_sec`가 있는 가장 이른 기록(극단도 제외하지 않음)을 예측과 비교해 실제 기록, 차이(실제 − 예측, 초), 명목 범위 대비 위치(범위보다 빠름 / 범위 안 / 범위보다 느림), 학습 자료에서 그만큼 이상 빨랐거나 느렸던 경우의 비율을 보여 준다. 비율은 범위 보정과 같은 train 폴드 밖 B2 잔차의 1%~99% 분위수 표([`demo/feedback_quantiles.json`](demo/feedback_quantiles.json), 집계값만 있음)를 선형 보간한 값이며 test 자료는 쓰지 않는다. 비교할 기록이 없거나 7일이 아직 지나지 않았으면 그렇게 알려 준다. 범위 안·밖은 실력 변화의 증거가 아니고 1회 관측이며 예측 성능의 근거가 아니다(고정 문장으로 항상 표시). 처방·원인 설명·실력 변화 판정·달성 확률은 하지 않는다. `--feedback`이 없으면 출력은 기존과 같다.")
+A("- **요약 화면 + 자세히 보기**(사양 [`docs/demo_screen_spec.md`](docs/demo_screen_spec.md)): 기본 출력은 10줄 안팎의 요약 화면이다 — `[결과]`(예상 기록·명목 80% 범위·조건부 예측 문구·실측 포함률·개인 보장 아님), `[상태]`(`[입력 부족]`/`[조건별 검증 부족: 개발 결과 기준 경고]`/`[결과 미관측]` 또는 특이 조건 없음), `[안내]`(조건별 안내를 포함률·관측 수·사용자 수와 함께 한 줄씩), `[근거]`(평소·직전·예상 변화), `[주의]`(원인 분석·훈련 처방이 아님). `--goal`·`--feedback` 블록도 머리표 + 핵심 2~3줄이다. `--detail`은 요약 뒤에 기존 전체 출력(두 항의 방향 문장, 통계적 현상 문구, 근거 문서, 폭 불변 안내 등)을 **그대로** 붙인다. 계산식·범위·안내 규칙·상태 판정은 바뀌지 않았다.")
 A("- **화면 상태 표시**(사양 [`docs/prospective_log_spec.md`](docs/prospective_log_spec.md) 3절): 예측 첫 줄 바로 아래에 \"다음 7일 안 적격 5km 기록이 관측되는 경우에 대한 예측입니다(명목 80% 범위)\"와 실측 포함률(cold-start test, 탐색 결과)을 붙인다. 상태는 셋으로 구분한다: **[입력 부족]**(자격 미달로 예측 없음), **[조건별 검증 부족: 개발 결과 기준 경고]**(조건별 안내가 뜰 때, train 폴드 밖 개발 결과 기준이며 새 자료로 확인되지 않았음), **[결과 미관측]**(`--feedback`에서 7일이 지났는데 적격 기록이 없을 때).")
 A("- **`--log`·`--resolve`**(사양 [`docs/prospective_log_spec.md`](docs/prospective_log_spec.md)): `--log <파일>`은 실행할 때마다 한 줄(JSON Lines: 저장 시각, asof, 입력 CSV·`b2_params.json`·`stratum_notes.json`의 sha256, 코드 커밋, 상태, 점예측·명목 범위, 뜬 안내 종류, 전향/후향 점검)을 추가한다. 좌표와 개별 기록 값은 저장하지 않고, 저장소 안 경로는 거부한다. `--resolve <파일> --data <CSV>`는 저장된 예측마다 [asof, asof+7일)의 첫 적격 5km를 피드백과 같은 규칙으로 연결해 결과 관측(범위 안/빠름/느림)·결과 미관측·7일 미경과·입력 부족으로 센다. 결과 미관측은 실패나 적중으로 세지 않고, 같은 미래 세션을 공유한 예측은 표시하며 독립 결과 수를 따로 센다. 1인 기록은 입력 연결·계산·표시 확인 사례이며 일반화 성능의 근거가 아니다.")
 A("- **`--goal mm:ss`**: 목표(10:00~83:20)를 명목 범위와 비교해 \"명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림\" 중 하나와 예측−목표 차이(초)를 보여 준다. 범위 안·밖은 달성 확률이나 달성 가능 여부를 뜻하지 않으며 훈련 처방을 제공하지 않는다. 목표를 넣지 않으면 출력은 기존과 같다.")
