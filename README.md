@@ -14,6 +14,18 @@
 
 그림 3: **사후 분석**. 연속한 두 5km 사이의 관측된 러닝 기록의 공백 구간별 기록 변화(둘째 − 첫째) 중앙값과 95% CI. 쌍 30개 미만 구간은 흐리게 표시(참고, 표본 부족). 상관만 보며 인과·처방이 아니다. 상세: [`docs/within_person_results_5km.md`](docs/within_person_results_5km.md). 그림 2(정답 분포)·4(민감도 요약)는 [`docs/figures/`](docs/figures/).
 
+![모델 − B2 평균 차이](docs/figures/fig5_baseline_diff.png)
+
+그림 5: 모델별 (모델 − B2) 사용자별 MAE 차이의 **평균(주 지표)**과 사용자 단위 bootstrap 95% CI(cold-start test 71명, personalized 250명). 0 기준선 = B2와 같음, CI가 0을 포함하면 우열 확정 불가(동등성 입증 아님), 빨강 = CI 하한 > 0. 값은 [`docs/baseline_comparison_table.md`](docs/baseline_comparison_table.md)(49c02f8 값과 일치 assert). 중앙값은 그리지 않았다.
+
+![조건별 포함률](docs/figures/fig6_coverage_by_condition.png)
+
+그림 6: 조건별 명목 80% 범위 포함률과 95% CI. train 폴드 밖(개발 결과) vs test cold-start(탐색 결과, 이미 열람), 막대 옆에 관측 수/사용자 수, 30건 미만은 흐리게 "표본 부족". 범위 폭은 모든 조건에서 480.0초로 같다. 조건별 안내 4개 층은 개발 결과를 보고 고른 것이며 새 자료로 확인되지 않았다. 값은 [`docs/interval_by_condition.md`](docs/interval_by_condition.md)(`b2_failure_5km.md`와 일치 assert).
+
+![표본 감소 사슬](docs/figures/fig7_sample_chain.png)
+
+그림 7: 표본 감소 사슬 4,362 → 2,127 → 2,077 → 2,072(감소 2,290 = 2,235 + 50 + 5)와 단계별 사유, ④ 변화를 과거 자격 쪽·미래 관측 쪽으로 나눈 값. 값은 [`docs/baseline_comparison_table.md`](docs/baseline_comparison_table.md) C절(`sample_reduction_5km.md`와 일치 assert). 그림 5~7 생성: `python scripts/61_report_figures_5km.py`(같은 입력이면 PNG가 바이트까지 같다).
+
 ## 시연 프로토타입: 정직한 기대치 코치 (`demo/coach_demo.py`)
 
 위 결론에 따라 모델 대신 **평균 회귀 규칙(B2)만** 사용한다. 직전 28일 안 달리기 4회 이상과 유효 5km 기록 1회 이상이 있어야 예측하고, 부족하면 어떤 조건이 부족한지만 말한다. 예상 변화를 기본 변화량 a(LAD 절편, 평균이 아니라 '직전 기록이 평소와 같을 때'의 조건부 중앙값) 항과 평소 대비 보정 b×(직전 − 평소) 항으로 나눠 소수 1자리 초 값(합계만 정수 초)과 함께 보여주고, 명목 80% 범위는 train 사용자 단위 교차검증(GroupKFold) 폴드 밖 잔차의 10%·90% 분위수로 정했다(문구에 test 포함률을 탐색 결과로 함께 적고 개인에게 80%를 보장하지 않는다고 표시). 출력 문구 속 모든 숫자는 계산값과 일치하는지 자동 검사한다(불일치 시 오류). 표준 라이브러리만 쓴다.
