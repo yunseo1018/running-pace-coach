@@ -61,7 +61,8 @@ def reaction(text):
     first = lines[0]
     if text.startswith("오류:"):
         return esc("오류 출력, 종료 코드 2: " + " / ".join(lines))
-    if first.startswith("예측할 수 없습니다"):
+    if "예측할 수 없습니다" in first:
+        out.append("상태 표시: [입력 부족]")
         out.append("**예측 불가**: " + " ".join(l[2:] for l in lines if l.startswith("- ")))
     else:
         for l in lines:
@@ -75,8 +76,10 @@ def reaction(text):
             out.append("안내: " + l[2:])
         elif l.startswith("※ ") and not l.startswith("※ 이 조건") and not l.startswith("※ 위 안내"):
             out.append("알림: " + l[2:])
-    if not first.startswith("예측할 수 없습니다") and not any(l.startswith("※ 이 조건") for l in lines):
+    if "예측할 수 없습니다" not in first and not any(l.startswith("※ 이 조건") for l in lines):
         out.append("조건별 범위 안내 없음")
+    if any(l.startswith("[조건별 검증 부족") for l in lines):
+        out.append("상태 표시: [조건별 검증 부족: 개발 결과 기준 경고]")
     for l in lines:
         if l.startswith("목표 비교("):
             out.append(l)

@@ -94,8 +94,10 @@ def test_two_term_split_and_coverage_text():
     assert r["a_term"] == -15.0 and abs(r["b_term"] - (-40.0)) < 1e-9 and r["tot_int"] == -55      # -15 + (-0.8 x 50)
     text = cd.format_report(r)
     assert "기본 변화량 a(−15.0초)" in text and "b×(직전 − 평소)(−40.0초)" in text and "예상 변화 약 −55초" in text
-    assert "테스트 포함률 73.9%(탐색 결과), 개인에게 80%를 보장하지 않음" in text and "명목 80% 범위 " in text
-    assert "다음 7일 안에 5km 기록이 관측된 경우를 기준으로 한 예측입니다" in text
+    assert "실측 포함률 73.9%(cold-start test, 탐색 결과), 개인에게 80%를 보장하지 않음" in text and "명목 80% 범위 " in text
+    assert "다음 7일 안 적격 5km 기록이 관측되는 경우에 대한 예측입니다(명목 80% 범위)" in text
+    first = text.split("\n")
+    assert first[1].startswith("다음 7일 안 적격 5km") and first[2].startswith("실측 포함률") and "personalized" not in text      # 첫 줄 바로 아래에 관측 조건·실측 포함률
     assert "직전 기록이 평소보다 50초 느렸던 만큼 보정 항(−40.0초)이 평소 쪽(빠른 쪽)으로 움직였고" in text and "통계적 현상이며, 원인 효과가 아님" in text and "때문에" not in text
     assert "중앙값은 약 −15초였음(상관, 인과 아님)" in text
     assert "평균 변화량" not in text and "49c02f8" not in text and "최종 평가 결과(docs/final_results_5km.md)" in text
@@ -802,6 +804,194 @@ def test_demo_cases_forbidden_list_matches_feedback_test_list():
         assert '"%s"' % w in doc
     for kind in ("처방", "확률", "원인 설명", "실력 변화 판정"):
         assert kind in doc.split("## 3. 이 프로그램이 하지 않는 것")[1]
+
+
+# ---------------------------------------------------------------- 예측 저장(--log)·결과 연결(--resolve)·상태 표시 (docs/prospective_log_spec.md)
+import hashlib as _hashlib
+import json as _json
+
+LOG_KEYS = {"logged_at", "asof", "asof_epoch", "csv_sha256", "code_commit", "code_dirty", "params_sha256", "notes_sha256", "status", "pred_sec",
+            "range_lo_sec", "range_hi_sec", "notices", "kind", "n_later_sessions"}
+
+
+def _sha(path):
+    return _hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _write_log(tmp, entries, name="pred.jsonl"):
+    p = Path(tmp) / name
+    p.write_text("".join(_json.dumps(e, ensure_ascii=False) + "\n" for e in entries), encoding="utf-8")
+    return str(p)
+
+
+def _entry(asof_epoch, status="예측", lo=1285, hi=1765, kind="후향 점검"):
+    return {"logged_at": "2026-01-01T00:00:00Z", "asof": str(asof_epoch), "asof_epoch": asof_epoch, "csv_sha256": "x", "code_commit": "c", "code_dirty": False,
+            "params_sha256": "p", "notes_sha256": "n", "status": status, "pred_sec": 1485 if status == "예측" else None,
+            "range_lo_sec": lo if status == "예측" else None, "range_hi_sec": hi if status == "예측" else None, "notices": [], "kind": kind, "n_later_sessions": 0}
+
+
+def test_status_tags_input_short_warning_and_unobserved():
+    with tempfile.TemporaryDirectory() as tmp:
+        _r, text = cd.run(_csv(tmp, [(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)]), str(ASOF), P, now=NOW)
+        assert text.startswith("[입력 부족] 예측할 수 없습니다. 부족한 조건:")
+        _r, warn = cd.run(_csv(tmp, _rows_ok(), "w.csv"), str(ASOF), P, now=NOW)                              # 과거 5km 1개 -> 조건별 안내
+        lines = warn.split("\n")
+        i = lines.index(cd.WARN_TAG)
+        assert lines[i + 1].startswith("※ 이 조건(") and "[조건별 검증 부족: 개발 결과 기준 경고]" in cd.WARN_TAG and "새 자료로 확인되지 않았습니다" in cd.WARN_TAG
+        _r, clean = cd.run(_csv_stop(tmp, _rows_clean(), "c.csv"), str(ASOF), P, now=NOW)
+        assert "[조건별 검증 부족" not in clean and "[입력 부족]" not in clean and "[결과 미관측]" not in clean
+        _r, _t, none_el = _fb(tmp, [], now=NOW)                                                              # 7일 지남 + 기록 없음
+        assert none_el.split("\n")[1].startswith("[결과 미관측] 다음 7일 안에 비교할 5km 기록이 없습니다")
+        _r, _t, none_wait = _fb(tmp, [], now=ASOF + 3 * cd.DAY)                                             # 7일 미경과: 미관측 표시 없음
+        assert "[결과 미관측]" not in none_wait and "아직 7일이 지나지 않았습니다" in none_wait
+        _r, _t, short = _fb(tmp, [_after(2, 5.2, 1500.0)], rows=[(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)])
+        assert "[입력 부족] 예측이 없어 비교하지 않습니다" in short
+
+
+def test_screen_first_lines_show_observation_condition_and_cold_start_coverage_only():
+    with tempfile.TemporaryDirectory() as tmp:
+        res, text = cd.run(_csv(tmp, _rows_ok(), "s.csv"), str(ASOF), P, now=NOW)
+        lines = text.split("\n")
+        assert lines[0].startswith("다음 7일 안 5km 예상 기록: ") and lines[1] == "다음 7일 안 적격 5km 기록이 관측되는 경우에 대한 예측입니다(명목 80% 범위)"
+        assert lines[2] == "실측 포함률 73.9%(cold-start test, 탐색 결과), 개인에게 80%를 보장하지 않음" and "personalized" not in text and "77.8" not in text
+        assert (res["pred"], res["lo"], res["hi"]) == (1485.0, 1285.0, 1765.0)                          # 예측·범위는 그대로
+
+
+def test_log_entry_fields_hashes_and_no_coordinates():
+    with tempfile.TemporaryDirectory() as tmp:
+        csvp = _csv(tmp, _rows_ok(), "in.csv")
+        logp = str(Path(tmp) / "pred.jsonl")
+        res, text = cd.run(csvp, str(ASOF), P, now=NOW, log=logp, commit=("abc123", False))
+        assert text.endswith("예측을 저장했습니다(1번째 줄).")
+        raw = Path(logp).read_text(encoding="utf-8")
+        assert raw.count("\n") == 1
+        e = _json.loads(raw)
+        assert set(e) == LOG_KEYS
+        assert e["csv_sha256"] == _sha(csvp) and e["params_sha256"] == _sha(cd.PARAMS_PATH) and e["notes_sha256"] == _sha(cd.NOTES_PATH)
+        assert e["code_commit"] == "abc123" and e["code_dirty"] is False and e["logged_at"] == "1970-04-21T00:00:00Z"        # NOW = ASOF + 10일
+        assert e["status"] == "예측" and e["pred_sec"] == 1485 and e["range_lo_sec"] == 1285 and e["range_hi_sec"] == 1765
+        assert e["notices"] == ["과거 5km 1개", "정지 정보 없음"] and e["kind"] == "전향" and e["n_later_sessions"] == 0 and e["asof"] == str(ASOF)
+        # 좌표·개별 기록 값은 저장하지 않는다: CSV의 시각·거리·T5 값이 줄 안에 없다
+        for needle in ("latitude", "longitude", "heart", "coord", "1500.0", str(int(ASOF - 3 * cd.DAY)), "5.2", "t5"):
+            assert needle not in raw, needle
+        real = cd.git_commit()                                                                              # 실제 git 호출: 해시 또는 'unknown'
+        assert real[0] == "unknown" or len(real[0]) == 40
+
+
+def test_log_duplicate_skipped_inside_repo_rejected_and_input_short_status():
+    with tempfile.TemporaryDirectory() as tmp:
+        csvp = _csv(tmp, _rows_ok(), "in.csv")
+        logp = str(Path(tmp) / "p.jsonl")
+        cd.run(csvp, str(ASOF), P, now=NOW, log=logp, commit=("c1", False))
+        _r, again = cd.run(csvp, str(ASOF), P, now=NOW, log=logp, commit=("c1", False))
+        assert again.endswith("이미 저장되어 있습니다(1번째 줄, 같은 기준 시점·입력 파일·코드 커밋).") and len(Path(logp).read_text(encoding="utf-8").splitlines()) == 1
+        _r, other = cd.run(csvp, str(ASOF), P, now=NOW, log=logp, commit=("c2", True))                    # 코드 커밋이 다르면 별도 줄
+        assert other.endswith("예측을 저장했습니다(2번째 줄).") and len(Path(logp).read_text(encoding="utf-8").splitlines()) == 2
+        e = _problem(cd.run, csvp, str(ASOF), P, now=NOW, log=str(cd.REPO / "demo" / "should_not_exist.mine.jsonl"), commit=("c", False))
+        assert "저장소 폴더 안" in e.reason and not (cd.REPO / "demo" / "should_not_exist.mine.jsonl").exists()
+        short = _csv(tmp, [(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)], "short.csv")
+        cd.run(short, str(ASOF), P, now=NOW, log=logp, commit=("c1", False))
+        last = _json.loads(Path(logp).read_text(encoding="utf-8").splitlines()[-1])
+        assert last["status"] == "입력 부족" and last["pred_sec"] is None and last["range_lo_sec"] is None and last["notices"] == []
+
+
+def test_log_kind_prospective_vs_retrospective_and_notice_kinds():
+    with tempfile.TemporaryDirectory() as tmp:
+        logp = str(Path(tmp) / "k.jsonl")
+        cd.run(_csv(tmp, _rows_ok(), "a.csv"), str(ASOF), P, now=NOW, log=logp, commit=("c", False))
+        cd.run(_csv(tmp, _rows_ok([_after(2, 5.2, 1500.0), _after(4, 3.0, None)]), "b.csv"), str(ASOF), P, now=NOW, log=logp, commit=("c", False))
+        e1, e2 = (_json.loads(l) for l in Path(logp).read_text(encoding="utf-8").splitlines())
+        assert (e1["kind"], e1["n_later_sessions"]) == ("전향", 0) and (e2["kind"], e2["n_later_sessions"]) == ("후향 점검", 2)
+        assert (e1["pred_sec"], e1["range_lo_sec"], e1["range_hi_sec"]) == (e2["pred_sec"], e2["range_lo_sec"], e2["range_hi_sec"])   # 예측은 asof 이전 기록만 사용
+        assert e1["notices"] == ["과거 5km 1개", "정지 정보 없음"]
+
+
+def test_resolve_four_states_and_summary_counts():
+    with tempfile.TemporaryDirectory() as tmp:
+        now = ASOF + 40 * cd.DAY
+        data = _csv(tmp, [_after(2, 5.2, 1500.0),            # E1(asof 0): 범위 안
+                          _after(12, 5.2, 1200.0),           # E5(asof 10): 범위보다 빠름
+                          _after(27, 5.2, 1900.0)], "d.csv")  # E6(asof 25): 범위보다 느림
+        e = [_entry(ASOF), _entry(ASOF + 20 * cd.DAY), _entry(ASOF + 35 * cd.DAY), _entry(ASOF, status="입력 부족"), _entry(ASOF + 10 * cd.DAY), _entry(ASOF + 25 * cd.DAY)]
+        rows, text = cd.resolve(_write_log(tmp, e), data, now=now)
+        assert [r["state"] for r in rows] == ["결과 관측", "결과 미관측", "7일 미경과", "입력 부족", "결과 관측", "결과 관측"]
+        assert [r["pos"] for r in rows] == ["in", None, None, None, "fast", "slow"]
+        assert "전체 예측 수: 6" in text and "입력 부족: 1" in text and "결과 관측: 3 (명목 범위 안 1 / 범위보다 빠름 1 / 범위보다 느림 1), 독립 결과 수: 3" in text
+        assert "결과 미관측: 1" in text and "7일 미경과: 1" in text and cd.ONE_PERSON_LINE in text
+        assert "실패나 적중으로 세지 않음" in text
+
+
+def test_resolve_shared_outcome_session_counts_independent_results_once():
+    with tempfile.TemporaryDirectory() as tmp:
+        data = _csv(tmp, [_after(12, 5.2, 1200.0), _after(30, 5.2, 1500.0)], "d.csv")
+        e = [_entry(ASOF + 10 * cd.DAY), _entry(ASOF + 11 * cd.DAY), _entry(ASOF + 28 * cd.DAY)]       # 앞의 둘은 12일째 5km를 같이 정답으로 씀
+        rows, text = cd.resolve(_write_log(tmp, e), data, now=ASOF + 60 * cd.DAY, detail=True)
+        assert [r["shared"] for r in rows] == [True, True, False]
+        assert "결과 관측: 3 (" in text and "독립 결과 수: 2" in text and "정답으로 공유한 예측: 2개" in text
+        detail = text.split("번호 | 종류")[1]
+        assert detail.count("공유") == 3 and detail.count(" | 공유") == 3          # 헤더의 '공유' 1회 + 공유 표시 2줄
+        assert "1485" not in text and "1285" not in text                           # 점예측·범위 값은 나열하지 않는다
+
+
+def test_resolve_seven_day_boundaries_and_unobserved_not_counted_as_result():
+    with tempfile.TemporaryDirectory() as tmp:
+        at7 = _csv(tmp, [_after(7, 5.2, 1500.0)], "at7.csv")                       # 정확히 asof+7일에 시작: 제외
+        rows, text = cd.resolve(_write_log(tmp, [_entry(ASOF)]), at7, now=ASOF + 8 * cd.DAY)
+        assert rows[0]["state"] == "결과 미관측" and "결과 관측: 0 (" in text and "독립 결과 수: 0" in text
+        just = _csv(tmp, [(ASOF + 7 * cd.DAY - 1, ASOF + 7 * cd.DAY + 1800, 5.2, 1500.0)], "just.csv")      # 1초 전에 시작: 포함
+        rows, _t = cd.resolve(_write_log(tmp, [_entry(ASOF)], "j.jsonl"), just, now=ASOF + 8 * cd.DAY)
+        assert rows[0]["state"] == "결과 관측"
+        empty = _csv(tmp, [_after(2, 3.0, None)], "none.csv")
+        r1, _t = cd.resolve(_write_log(tmp, [_entry(ASOF)], "e1.jsonl"), empty, now=ASOF + 7 * cd.DAY)         # now == asof+7일 -> 7일 지남
+        r2, _t = cd.resolve(_write_log(tmp, [_entry(ASOF)], "e2.jsonl"), empty, now=ASOF + 7 * cd.DAY - 1)     # 1초 모자람 -> 미경과
+        assert r1[0]["state"] == "결과 미관측" and r2[0]["state"] == "7일 미경과"
+        # 5.0~5.5km인데 t5가 없는 기록만 있으면 결과 미관측이며 그 사실만 덧붙인다(적격 기록 선택·기간 연장 없음)
+        no_t5 = _csv(tmp, [_after(2, 5.2, None), _after(9, 5.2, 1500.0)], "not5.csv")
+        rows, text = cd.resolve(_write_log(tmp, [_entry(ASOF)], "n.jsonl"), no_t5, now=ASOF + 30 * cd.DAY)
+        assert rows[0]["state"] == "결과 미관측" and "t5_sec가 없는 예측: 1개" in text
+
+
+def test_resolve_split_by_kind_sums_and_forbidden_expressions():
+    with tempfile.TemporaryDirectory() as tmp:
+        data = _csv(tmp, [_after(2, 5.2, 1500.0)], "d.csv")
+        e = [_entry(ASOF, kind="전향"), _entry(ASOF + 30 * cd.DAY, kind="전향"), _entry(ASOF, kind="후향 점검"), _entry(ASOF, status="입력 부족", kind="후향 점검")]
+        rows, text = cd.resolve(_write_log(tmp, e), data, now=ASOF + 60 * cd.DAY, detail=True)
+        assert "전향 2개: 입력 부족 0, 결과 관측 1(독립 결과 수 1), 결과 미관측 1, 7일 미경과 0" in text
+        assert "후향 점검 2개: 입력 부족 1, 결과 관측 1(독립 결과 수 1), 결과 미관측 0, 7일 미경과 0" in text
+        bad = [w for w in FB_FORBIDDEN if w in text]
+        assert not bad, bad
+        for w in ("적중률", "정확도", "성공률", "실패율"):
+            assert w not in text
+
+
+def test_resolve_cli_errors_and_end_to_end_log_then_resolve():
+    with tempfile.TemporaryDirectory() as tmp:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert cd.main(["--resolve", str(Path(tmp) / "none.jsonl"), "--data", str(Path(tmp) / "d.csv")]) == 2
+        assert buf.getvalue().startswith("오류: 저장 파일을 찾을 수 없습니다")
+        bad = Path(tmp) / "bad.jsonl"
+        bad.write_text('{"a": 1}\n', encoding="utf-8")
+        data = _csv(tmp, _rows_ok([_after(2, 5.2, 1500.0)]), "d.csv")
+        for argv, frag in ((["--resolve", str(bad), "--data", data], "1번째 줄을 읽을 수 없습니다"), (["--resolve", str(bad)], "--resolve에는 --data CSV가 필요합니다")):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                assert cd.main(argv) == 2
+            assert frag in buf.getvalue() and "Traceback" not in buf.getvalue()
+        logp = str(Path(tmp) / "e2e.jsonl")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert cd.main([data, "--asof", str(ASOF), "--log", logp]) == 0
+        assert buf.getvalue().rstrip("\n").endswith("예측을 저장했습니다(1번째 줄).")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert cd.main(["--resolve", logp, "--data", data]) == 0
+        out = buf.getvalue()
+        assert "전체 예측 수: 1" in out and "결과 관측: 1 (명목 범위 안 1 / 범위보다 빠름 0 / 범위보다 느림 0), 독립 결과 수: 1" in out and "후향 점검 1개" in out
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert cd.main([data, "--asof", str(ASOF)]) == 0                                             # --log가 없으면 저장하지 않는다
+        assert "저장" not in buf.getvalue()
 
 
 if __name__ == "__main__":

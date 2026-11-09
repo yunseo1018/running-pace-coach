@@ -25,3 +25,5 @@ my_runs/
 *.mine.csv
 apple_health_export/
 *.zip
+
+*.mine.jsonl

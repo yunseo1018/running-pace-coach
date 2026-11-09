@@ -320,11 +320,11 @@ def trend_text(res):
 
 def format_report(res):
     if not res["eligible"]:
-        return "예측할 수 없습니다. 부족한 조건:\n" + "\n".join("- " + s for s in res["shortfalls"]) + "\n해결: " + res["fix"]
+        return "[입력 부족] 예측할 수 없습니다. 부족한 조건:\n" + "\n".join("- " + s for s in res["shortfalls"]) + "\n해결: " + res["fix"]
     trend = trend_text(res)
     return ("다음 7일 안 5km 예상 기록: %s / 명목 80%% 범위 %s ~ %s\n" % (mmss(res["pred"]), mmss(res["lo"]), mmss(res["hi"]))
-            + "테스트 포함률 %s(탐색 결과), 개인에게 80%%를 보장하지 않음\n" % cov_text(res)
-            + "다음 7일 안에 5km 기록이 관측된 경우를 기준으로 한 예측입니다\n"
+            + "다음 7일 안 적격 5km 기록이 관측되는 경우에 대한 예측입니다(명목 80% 범위)\n"
+            + "실측 포함률 %s(cold-start test, 탐색 결과), 개인에게 80%%를 보장하지 않음\n" % cov_text(res)
             + "평소 기록(과거 중앙값): %s, 직전 기록: %s\n" % (mmss(res["m"]), mmss(res["ref"]))
             + "예상 변화 약 %s초 = 기본 변화량 a(%s초) + 평소 대비 보정 b×(직전 − 평소)(%s초)\n"
             % (signed(res["tot_int"]), signed1(res["a_term"]), signed1(res["b_term"]))
@@ -460,7 +460,7 @@ def check_numbers(text, res):
             continue
         if ("." in t and t not in dec) or ("." not in t and t not in ints):
             raise ValueError("계산값과 맞지 않는 숫자: " + t)
-    expect = {"포함률": "테스트 포함률 %s(탐색 결과)" % cov_text(res), "예상 변화": "예상 변화 약 %s초" % signed(res["tot_int"]),
+    expect = {"포함률": "실측 포함률 %s(cold-start test, 탐색 결과)" % cov_text(res), "예상 변화": "예상 변화 약 %s초" % signed(res["tot_int"]),
               "a 항": "기본 변화량 a(%s초)" % signed1(res["a_term"]), "보정 항": "b×(직전 − 평소)(%s초)" % signed1(res["b_term"]),
               "a 설명": "중앙값은 약 %s초였음" % signed(res["a_term"])}
     for k, frag in expect.items():
@@ -534,9 +534,9 @@ def format_feedback(res, fb, quantiles):
     info = {"ints": set(), "times": [], "dates": [], "share": None}
     lines = [FB_HEAD]
     if not res["eligible"]:
-        lines.append("예측이 없어 비교하지 않습니다(위 부족한 조건이 충족되면 비교할 수 있습니다).")
+        lines.append("[입력 부족] 예측이 없어 비교하지 않습니다(위 부족한 조건이 충족되면 비교할 수 있습니다).")
     elif fb["actual"] is None:
-        lines.append("다음 7일 안에 비교할 5km 기록이 없습니다")
+        lines.append(("[결과 미관측] " if fb["elapsed"] else "") + "다음 7일 안에 비교할 5km 기록이 없습니다")
         if not fb["elapsed"]:
             lines.append("아직 7일이 지나지 않았습니다")
         if fb["n_cands"]:
@@ -586,7 +586,195 @@ def check_feedback_numbers(text, info):
     return True
 
 
-def run(csv_path, asof, params=None, goal=None, now=None, feedback=False):
+# ---------------------------------------------------------------- 예측 저장(--log)과 결과 연결(--resolve) (docs/prospective_log_spec.md)
+REPO = Path(__file__).resolve().parent.parent
+WARN_TAG = "[조건별 검증 부족: 개발 결과 기준 경고] train 폴드 밖 개발 결과 기준이며 새 자료로 확인되지 않았습니다"
+ONE_PERSON_LINE = "1인 기록은 입력 연결·계산·표시 확인 사례이며 일반화 성능의 근거가 아님"
+NOTICE_KIND = {("a", "1개(x = 0)"): "과거 5km 1개", ("a", "2~4개"): "과거 5km 2~4개", ("b", "120초 초과"): "평소와 2분 넘게 차이", ("e", "300초 초과"): "정지 5분 초과"}
+NO_STOP_KIND = "정지 정보 없음"
+LOG_STATUS_OK, LOG_STATUS_SHORT = "예측", "입력 부족"
+RES_OBS, RES_NONE, RES_WAIT, RES_SHORT = "결과 관측", "결과 미관측", "7일 미경과", "입력 부족"
+
+
+def inside_repo(path):
+    try:
+        Path(path).resolve().relative_to(REPO)
+        return True
+    except ValueError:
+        return False
+
+
+def sha256_file(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def git_commit():
+    """(코드 커밋 해시, demo/ 미커밋 변경 유무). git이 없거나 실패하면 ('unknown', None)."""
+    import subprocess
+    try:
+        h = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True, timeout=20, check=True).stdout.strip()
+        dirty = bool(subprocess.run(["git", "status", "--porcelain", "--", "demo"], cwd=REPO, capture_output=True, text=True, timeout=20, check=True).stdout.strip())
+        return h, dirty
+    except Exception:
+        return "unknown", None
+
+
+def notice_kinds(matched, lines):
+    kinds = [NOTICE_KIND.get((s["dim"], s["label"]), "%s %s" % (s["dim"], s["label"])) for s in matched]
+    if NO_STOP_LINE in lines:
+        kinds.append(NO_STOP_KIND)
+    return kinds
+
+
+def build_log_entry(csv_path, asof_text, asof_s, res, matched, note_lines, sessions, now, commit=None):
+    """저장할 한 줄(dict). 좌표·개별 기록 값은 넣지 않는다(개수·해시·집계 값만)."""
+    import datetime as _dt
+    h, dirty = commit if commit is not None else git_commit()
+    n_later = sum(1 for s in sessions if s["start"] >= asof_s)
+    ok = res["eligible"]
+    return {"logged_at": _dt.datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "asof": str(asof_text), "asof_epoch": asof_s,
+            "csv_sha256": sha256_file(csv_path), "code_commit": h, "code_dirty": dirty,
+            "params_sha256": sha256_file(PARAMS_PATH), "notes_sha256": sha256_file(NOTES_PATH),
+            "status": LOG_STATUS_OK if ok else LOG_STATUS_SHORT,
+            "pred_sec": int(round(res["pred"])) if ok else None, "range_lo_sec": int(round(res["lo"])) if ok else None, "range_hi_sec": int(round(res["hi"])) if ok else None,
+            "notices": notice_kinds(matched, note_lines) if ok else [],
+            "kind": "후향 점검" if n_later else "전향", "n_later_sessions": n_later}
+
+
+def append_log(log_path, entry):
+    """로그에 한 줄 추가. 같은 (asof, csv_sha256, code_commit) 줄이 있으면 추가하지 않는다. 반환 (추가 여부, 줄 번호)."""
+    p = Path(log_path)
+    if inside_repo(p):
+        raise InputProblem("--log 파일이 저장소 폴더 안입니다(개인 기록이 커밋될 수 있음).", "저장소 밖 폴더의 경로를 지정하세요. 예: <저장소 밖 폴더>/my_runs/predictions.mine.jsonl")
+    lines = []
+    if p.exists():
+        lines = [l for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+        for i, l in enumerate(lines, start=1):
+            try:
+                e = json.loads(l)
+            except ValueError:
+                raise InputProblem("--log 파일 %d번째 줄을 읽을 수 없습니다." % i, "JSON Lines 형식(한 줄에 JSON 하나)인 파일을 지정하거나 새 파일 이름을 쓰세요.")
+            if (e.get("asof_epoch"), e.get("csv_sha256"), e.get("code_commit")) == (entry["asof_epoch"], entry["csv_sha256"], entry["code_commit"]):
+                return False, i
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as e:
+        raise InputProblem("--log 파일에 쓸 수 없습니다(%s)." % type(e).__name__, "경로와 쓰기 권한을 확인하세요.")
+    return True, len(lines) + 1
+
+
+def load_log(path):
+    p = Path(path)
+    if not p.exists():
+        raise InputProblem("저장 파일을 찾을 수 없습니다: %s" % path, "--log로 만든 .jsonl 경로를 확인하세요.")
+    out = []
+    for i, l in enumerate(p.read_text(encoding="utf-8").splitlines(), start=1):
+        if not l.strip():
+            continue
+        try:
+            e = json.loads(l)
+            float(e["asof_epoch"])
+            if e["status"] not in (LOG_STATUS_OK, LOG_STATUS_SHORT):
+                raise ValueError("status")
+            if e["status"] == LOG_STATUS_OK:
+                int(e["range_lo_sec"]), int(e["range_hi_sec"])
+            e["kind"]
+        except (ValueError, KeyError, TypeError):
+            raise InputProblem("%d번째 줄을 읽을 수 없습니다." % i, "--log로 저장한 줄이 아니거나 손상되었습니다. 해당 줄을 지우거나 새 파일을 쓰세요.")
+        out.append(e)
+    if not out:
+        raise InputProblem("저장 파일에 예측이 없습니다.", "--log로 예측을 먼저 저장하세요.")
+    return out
+
+
+def classify_entries(entries, sessions, now):
+    """저장된 줄마다 상태를 정한다. 반환 [dict(상태, 위치, 정답 세션 시작, 공유, 5km인데 t5 없음)]. 예측은 다시 계산하지 않는다."""
+    rows = []
+    for e in entries:
+        r = {"kind": e["kind"], "asof_epoch": float(e["asof_epoch"]), "state": None, "pos": None, "actual_start": None, "shared": False, "n_no_t5": 0}
+        if e["status"] != LOG_STATUS_OK:
+            r["state"] = RES_SHORT
+        else:
+            fb = find_actual(sessions, r["asof_epoch"], now)
+            if fb["actual"] is not None:
+                act_s = int(round(fb["actual"]["t5"]))
+                lo, hi = int(e["range_lo_sec"]), int(e["range_hi_sec"])
+                r.update(state=RES_OBS, pos=("fast" if act_s < lo else ("slow" if act_s > hi else "in")), actual_start=fb["actual"]["start"])
+            elif not fb["elapsed"]:
+                r["state"] = RES_WAIT
+            else:
+                r["state"] = RES_NONE
+                r["n_no_t5"] = fb["n_cands"]
+        rows.append(r)
+    cnt = {}
+    for r in rows:
+        if r["actual_start"] is not None:
+            cnt[r["actual_start"]] = cnt.get(r["actual_start"], 0) + 1
+    for r in rows:
+        r["shared"] = r["actual_start"] is not None and cnt[r["actual_start"]] > 1
+    return rows
+
+
+def _count(rows):
+    c = {RES_SHORT: 0, RES_OBS: 0, RES_NONE: 0, RES_WAIT: 0}
+    pos = {"in": 0, "fast": 0, "slow": 0}
+    for r in rows:
+        c[r["state"]] += 1
+        if r["pos"]:
+            pos[r["pos"]] += 1
+    indep = len({r["actual_start"] for r in rows if r["actual_start"] is not None})
+    assert sum(c.values()) == len(rows)
+    return c, pos, indep
+
+
+def format_resolve(entries, rows, data_sha, detail=False):
+    c, pos, indep = _count(rows)
+    out = ["예측 저장 결과 연결 요약(저장된 예측 %d개, 데이터 sha256 %s…)" % (len(rows), data_sha[:12]),
+           "각 예측은 [asof, asof+7일)에 시작한 첫 적격 5km(5.0~5.5km, t5_sec 있음, 극단 포함) 하나와만 연결했고 예측은 다시 계산하지 않았습니다.",
+           "전체 예측 수: %d" % len(rows),
+           "입력 부족: %d" % c[RES_SHORT],
+           "결과 관측: %d (명목 범위 안 %d / 범위보다 빠름 %d / 범위보다 느림 %d), 독립 결과 수: %d" % (c[RES_OBS], pos["in"], pos["fast"], pos["slow"], indep),
+           "결과 미관측: %d (7일이 지났으나 적격 5km 기록 없음; 실패나 적중으로 세지 않음)" % c[RES_NONE],
+           "7일 미경과: %d" % c[RES_WAIT]]
+    n_shared = sum(1 for r in rows if r["shared"])
+    if n_shared:
+        out.append("같은 미래 세션을 정답으로 공유한 예측: %d개(독립 결과 수는 서로 다른 정답 세션의 수)" % n_shared)
+    n_no_t5 = sum(1 for r in rows if r["n_no_t5"])
+    if n_no_t5:
+        out.append("결과 미관측 중 5.0~5.5km 기록은 있으나 t5_sec가 없는 예측: %d개" % n_no_t5)
+    for kind in ("전향", "후향 점검"):
+        sub = [r for r in rows if r["kind"] == kind]
+        if sub:
+            cc, pp, ii = _count(sub)
+            out.append("%s %d개: 입력 부족 %d, 결과 관측 %d(독립 결과 수 %d), 결과 미관측 %d, 7일 미경과 %d" % (kind, len(sub), cc[RES_SHORT], cc[RES_OBS], ii, cc[RES_NONE], cc[RES_WAIT]))
+    out.append("후향 점검 = 입력 CSV에 asof 이후 기록이 이미 있는 상태에서 저장한 예측(결과를 모르는 전향 예측과 구분).")
+    out.append(ONE_PERSON_LINE)
+    if detail:
+        out.append("")
+        out.append("번호 | 종류 | asof 날짜 | 상태 | 공유")
+        for i, r in enumerate(rows, start=1):
+            st = r["state"] if r["pos"] is None else "%s(%s)" % (r["state"], FB_POS[r["pos"]])
+            out.append("%d | %s | %s | %s | %s" % (i, r["kind"], datetime.fromtimestamp(r["asof_epoch"], tz=timezone.utc).strftime("%Y-%m-%d"), st, "공유" if r["shared"] else "-"))
+    return "\n".join(out)
+
+
+def resolve(log_path, data_path, now=None, detail=False):
+    """저장된 예측과 데이터 CSV를 연결해 요약한다. 반환 (rows, 문구)."""
+    now = time.time() if now is None else now
+    entries = load_log(log_path)
+    sessions, _notices = load_sessions(data_path, now)
+    rows = classify_entries(entries, sessions, now)
+    return rows, format_resolve(entries, rows, sha256_file(data_path), detail)
+
+
+def run(csv_path, asof, params=None, goal=None, now=None, feedback=False, log=None, commit=None):
     """입력 검사 → 예측 → 문구와 숫자 검사. 입력·옵션 문제는 InputProblem. 반환 (res, 출력 문구)."""
     params = params or load_params()
     now = time.time() if now is None else now
@@ -599,6 +787,8 @@ def run(csv_path, asof, params=None, goal=None, now=None, feedback=False):
     parts = ["※ " + n for n in notices + res["notices"]] + [main_text]
     note_lines, matched = stratum_lines(res)
     check_stratum_lines(note_lines, matched, res)
+    if matched:
+        parts.append(WARN_TAG)              # [조건별 검증 부족: 개발 결과 기준 경고]
     parts += note_lines
     if goal_s is not None:
         if res["eligible"]:
@@ -615,18 +805,44 @@ def run(csv_path, asof, params=None, goal=None, now=None, feedback=False):
         res["feedback"] = fb_info
         parts.append("")
         parts.append(fb_text)
+    if log:
+        entry = build_log_entry(csv_path, asof, asof_s, res, matched, note_lines, sessions, now, commit)
+        added, n = append_log(log, entry)
+        res["log_entry"] = entry
+        parts.append("")
+        parts.append("예측을 저장했습니다(%d번째 줄)." % n if added else "이미 저장되어 있습니다(%d번째 줄, 같은 기준 시점·입력 파일·코드 커밋)." % n)
     return res, "\n".join(parts)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="다음 7일 5km 기록 예상(평균 회귀 규칙) 시연")
-    ap.add_argument("csv", help="세션 CSV (열: " + ", ".join(REQUIRED_COLS) + ")")
-    ap.add_argument("--asof", required=True, help="기준 시점(에포크 초 또는 ISO 일시)")
+    ap.add_argument("csv", nargs="?", default=None, help="세션 CSV (열: " + ", ".join(REQUIRED_COLS) + ")")
+    ap.add_argument("--asof", default=None, help="기준 시점(에포크 초 또는 ISO 일시)")
     ap.add_argument("--goal", default=None, help="목표 기록 mm:ss(10:00~83:20). 예측 범위와 비교해 '명목 범위보다 빠름/안/느림'을 보여 준다")
     ap.add_argument("--feedback", action="store_true", help="예측 뒤에 기준 시점 이후 7일 안 첫 5km 기록과 예측을 비교한 피드백을 붙인다(처방·원인·실력 판정 아님)")
+    ap.add_argument("--log", default=None, help="예측을 이 JSON Lines 파일에 한 줄 추가한다(저장소 밖 경로; 좌표·개별 기록 값은 저장하지 않음)")
+    ap.add_argument("--resolve", default=None, help="--log로 저장한 파일의 예측을 --data CSV의 실제 결과와 연결해 요약한다")
+    ap.add_argument("--data", default=None, help="--resolve에서 결과를 찾을 세션 CSV")
+    ap.add_argument("--detail", action="store_true", help="--resolve 요약에 줄별 상태(날짜·상태·공유)를 덧붙인다")
     a = ap.parse_args(argv)
+    if a.resolve:
+        try:
+            if not a.data:
+                raise InputProblem("--resolve에는 --data CSV가 필요합니다.", "예: python demo/coach_demo.py --resolve 예측.jsonl --data 세션.csv")
+            _rows, text = resolve(a.resolve, a.data, detail=a.detail)
+        except InputProblem as e:
+            print(problem_text(e))
+            return 2
+        except Exception as e:
+            print("오류: 예상하지 못한 문제가 생겼습니다(%s)." % type(e).__name__)
+            print("해결: 저장 파일과 데이터 CSV의 형식을 확인하고, 계속되면 파일과 명령을 함께 알려 주세요.")
+            return 2
+        print(text)
+        return 0
+    if a.csv is None or a.asof is None:
+        ap.error("세션 CSV와 --asof가 필요합니다(결과 연결은 --resolve 파일 --data CSV).")
     try:
-        _res, text = run(a.csv, a.asof, goal=a.goal, feedback=a.feedback)
+        _res, text = run(a.csv, a.asof, goal=a.goal, feedback=a.feedback, log=a.log)
     except InputProblem as e:
         print(problem_text(e))
         return 2
