@@ -85,7 +85,8 @@ for line in perf.splitlines():
     m = re.match(r"\| (.+?) \| ([\d.]+) \| ([\d.]+) \| ([\d.]+) \| ([\d,]+) \| ([\d,]+) \|", line)
     if m:
         prow[m.group(1)] = m.groups()[1:]
-b2c = prow["B2 데모: 자격 판정·예측·문구·숫자 검사(CSV 읽기 제외)"]
+b2c = prow["B2 예측 계산만: 자격 판정·예측·기존 문구·숫자 검사(CSV 읽기·요약 화면 조립 제외)"]
+b2s = prow["B2 + 요약 화면 조립까지(CSV 읽기 제외; 조건별 안내 JSON 읽기·요약 숫자 검사 포함)"]
 
 L = []
 A = L.append
@@ -150,7 +151,7 @@ A("- **화면 상태 표시**(사양 [`docs/prospective_log_spec.md`](docs/prosp
 A("- **`--log`·`--resolve`**(사양 [`docs/prospective_log_spec.md`](docs/prospective_log_spec.md)): `--log <파일>`은 실행할 때마다 한 줄(JSON Lines: 저장 시각, asof, 입력 CSV·`b2_params.json`·`stratum_notes.json`의 sha256, 코드 커밋, 상태, 점예측·명목 범위, 뜬 안내 종류, 전향/후향 점검)을 추가한다. 좌표와 개별 기록 값은 저장하지 않고, 저장소 안 경로는 거부한다. `--resolve <파일> --data <CSV>`는 저장된 예측마다 [asof, asof+7일)의 첫 적격 5km를 피드백과 같은 규칙으로 연결해 결과 관측(범위 안/빠름/느림)·결과 미관측·7일 미경과·입력 부족으로 센다. 결과 미관측은 실패나 적중으로 세지 않고, 같은 미래 세션을 공유한 예측은 표시하며 독립 결과 수를 따로 센다. 1인 기록은 입력 연결·계산·표시 확인 사례이며 일반화 성능의 근거가 아니다.")
 A("- **`--goal mm:ss`**: 목표(10:00~83:20)를 명목 범위와 비교해 \"명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림\" 중 하나와 예측−목표 차이(초)를 보여 준다. 범위 안·밖은 달성 확률이나 달성 가능 여부를 뜻하지 않으며 훈련 처방을 제공하지 않는다. 목표를 넣지 않으면 출력은 기존과 같다.")
 A(f"- **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start {cov[0][3]}%({cov[0][1]}개). personalized 포함률은 학습 자료와 겹쳐 독립 평가가 아니므로(전체 {ov.group(1)}건 중 {ov.group(2)}건 중복, [`docs/interval_by_condition.md`](docs/interval_by_condition.md) 4절) 주 결과로 쓰지 않는다. cold-start 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.")
-A(f"- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 {b2c[0]} ms, tracemalloc 최대 {b2c[3]}바이트, 파라미터 파일 {b2c[4]}바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).")
+A(f"- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 계산만(CSV 읽기·요약 화면 조립 제외) 중앙값 {b2c[0]} ms(tracemalloc 최대 {b2c[3]}바이트), 요약 화면 조립까지(CSV 읽기 제외) 중앙값 {b2s[0]} ms(tracemalloc 최대 {b2s[3]}바이트), 파라미터 파일 {b2c[4]}바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).")
 A("- 이 데모는 원인 분석이나 훈련 처방이 아니며, 모델 정확도의 이점을 주장하지 않는다(현재 자료로 모델과 B2의 우열을 확정할 수 없어 가장 단순한 규칙을 택했다).")
 A("")
 A("## 실행 방법")

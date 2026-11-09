@@ -60,7 +60,7 @@ def reaction(text):
         return esc("오류 출력, 종료 코드 2: " + " / ".join(text.split("\n")))
     sec, buf = None, {}
     for l in text.split("\n"):
-        m = re.match(r"\[(결과|상태|안내|근거|주의|목표 비교|뛴 다음의 피드백)\] ?(.*)", l)
+        m = re.match(r"\[(결과|상태|안내|근거|해결|주의|목표 비교|뛴 다음의 피드백)\] ?(.*)", l)
         if m:
             sec = m.group(1)
             buf.setdefault(sec, []).append(m.group(2))

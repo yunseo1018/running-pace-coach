@@ -91,6 +91,15 @@ def main():
         res = cd.assess(sessions, asof, params)
         cd.check_numbers(cd.format_report(res), res)
 
+    def b2_summary_no_csv():
+        """기본 출력(요약 화면) 조립까지: CSV 읽기는 미리 읽은 세션으로 대신한다(load_sessions를 잠시 교체). 조건별 안내 JSON 읽기·요약 숫자 검사 포함."""
+        orig = cd.load_sessions
+        cd.load_sessions = lambda path, now=None: (sessions, [])
+        try:
+            cd.run(EXAMPLE, ASOF, params)
+        finally:
+            cd.load_sessions = orig
+
     def b2_with_csv():
         cd.run(EXAMPLE, ASOF, params)
 
@@ -119,8 +128,9 @@ def main():
              "MLP": buf.getbuffer().nbytes + int(scaler_bytes)}
 
     rows = []
-    for name, fn, extra in [("B2 데모: 자격 판정·예측·문구·숫자 검사(CSV 읽기 제외)", b2_core, "B2 (데모)"),
-                            ("B2 데모: 위 + CSV 파일 읽기·파싱", b2_with_csv, "B2 (데모)"),
+    for name, fn, extra in [("B2 예측 계산만: 자격 판정·예측·기존 문구·숫자 검사(CSV 읽기·요약 화면 조립 제외)", b2_core, "B2 (데모)"),
+                            ("B2 + 요약 화면 조립까지(CSV 읽기 제외; 조건별 안내 JSON 읽기·요약 숫자 검사 포함)", b2_summary_no_csv, "B2 (데모)"),
+                            ("B2 + 요약 화면 조립 + CSV 파일 읽기·파싱(기본 출력 전체)", b2_with_csv, "B2 (데모)"),
                             ("B2 식만 (a + b·x)", b2_formula_only, "B2 (데모)"),
                             ("GBM 예측 1행 (기본 입력 11, 참고)", gbm_pred, "GBM"),
                             ("MLP 예측 1행 (기본 입력 11, 참고)", mlp_pred, "MLP")]:
@@ -140,11 +150,12 @@ def main():
              "- CPU: " + cpu_name(), "- OS: " + platform.platform(), "- Python: " + sys.version.split()[0],
              f"- numpy {np.__version__}, torch {torch.__version__}, torch 스레드 4", "- 측정 방법: 예측 1회를 %d번 반복(워밍업 %d회 제외), `time.perf_counter_ns`. 메모리 = `tracemalloc` 최대값(파이썬 힙만; torch 네이티브 메모리·인터프리터 기본 메모리는 포함되지 않음)." % (N_REP, N_WARM), "",
              "## 예측 1회 (%d회 반복)" % N_REP, "",
+             "두 가지를 나눠 적는다: **예측 계산만**(첫 행)은 자격 판정·B2 계산·기존 문구·숫자 검사이고, **요약 화면 조립까지**(둘째 행)는 여기에 요약 화면([결과]/[상태]/[안내]/[근거]) 구성, 조건별 안내 JSON 읽기, 요약 숫자 검사를 더한 시간이다(CSV 읽기 제외). 셋째 행은 CSV 읽기·파싱까지 포함한 기본 출력 전체다.", "",
              "| 대상 | 중앙값(ms) | 90% 분위(ms) | 최대(ms) | tracemalloc 최대(바이트) | 크기(바이트) |", "|---|---|---|---|---|---|"]
     for name, med, p90, mx, pk, sz in rows:
         lines.append(f"| {name} | {med:.4f} | {p90:.4f} | {mx:.4f} | {pk:,} | {sz:,} |")
     lines += ["",
-              "- 크기: B2 = `demo/b2_params.json` 파일 크기. GBM = pickle 직렬화 크기. MLP = `state_dict` 직렬화 + 스케일러 배열 크기(파라미터 %s개, 배포용 최적화·양자화 없음). 표의 크기 열은 대상 행이 아니라 해당 모델의 크기이며 B2 세 행은 같은 값이다." % f"{n_params:,}",
+              "- 크기: B2 = `demo/b2_params.json` 파일 크기. GBM = pickle 직렬화 크기. MLP = `state_dict` 직렬화 + 스케일러 배열 크기(파라미터 %s개, 배포용 최적화·양자화 없음). 표의 크기 열은 대상 행이 아니라 해당 모델의 크기이며 B2 네 행은 같은 값이다." % f"{n_params:,}",
               "- 프로세스 시작을 포함한 `python demo/coach_demo.py ...` 한 번 실행(5회) 벽시계 시간: 최소 %.0f ms, 중앙값 %.0f ms, 최대 %.0f ms (인터프리터 시작 시간이 대부분)." % (min(wall), float(np.median(wall)), max(wall)),
               "- 이 수치는 이 PC 한 대에서의 값이며 다른 기기·모바일에는 일반화할 수 없다. 모바일·온디바이스(INT8 포함) 측정은 하지 않았다(미측정).",
               "- 값의 변동: 같은 명령을 다시 실행하면 중앙값이 달라질 수 있다(다른 프로세스·전원 상태에 따라).", ""]

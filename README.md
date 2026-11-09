@@ -69,7 +69,7 @@ python demo/bench_demo.py               # docs/demo_performance.md 재생성
 [결과] 예측할 수 없습니다(자격 미달).
 [상태] [입력 부족]
 [안내] 부족한 조건: 직전 28일 안에 유효한 5km 기록이 없습니다(1회 이상 필요, 1회 부족).
-[근거] 해결: 직전 28일 안의 달리기 기록(4회 이상)과 5.0~5.5km의 5km 기록 1회 이상(t5_sec 포함)을 CSV에 추가하거나, 기록이 충분한 기준 시점(--asof)을 지정하세요.
+[해결] 직전 28일 안의 달리기 기록(4회 이상)과 5.0~5.5km의 5km 기록 1회 이상(t5_sec 포함)을 CSV에 추가하거나 기록이 충분한 기준 시점(--asof)을 지정하면 예측할 수 있습니다.
 [주의] 원인 분석·훈련 처방이 아닙니다. --detail로 계산 과정과 근거 문서를 볼 수 있습니다.
 ```
 
@@ -80,7 +80,7 @@ python demo/bench_demo.py               # docs/demo_performance.md 재생성
 [상태] [입력 부족]
 [안내] 부족한 조건: 직전 28일 안에 끝난 달리기가 2회입니다(4회 이상 필요, 2회 부족).
        부족한 조건: 직전 28일 안에 유효한 5km 기록이 없습니다(1회 이상 필요, 1회 부족). 5km 기록 1개가 있으나 5.0~5.5km 범위 밖 1개라 제외했습니다.
-[근거] 해결: 직전 28일 안의 달리기 기록(4회 이상)과 5.0~5.5km의 5km 기록 1회 이상(t5_sec 포함)을 CSV에 추가하거나, 기록이 충분한 기준 시점(--asof)을 지정하세요.
+[해결] 직전 28일 안의 달리기 기록(4회 이상)과 5.0~5.5km의 5km 기록 1회 이상(t5_sec 포함)을 CSV에 추가하거나 기록이 충분한 기준 시점(--asof)을 지정하면 예측할 수 있습니다.
 [주의] 원인 분석·훈련 처방이 아닙니다. --detail로 계산 과정과 근거 문서를 볼 수 있습니다.
 ```
 
@@ -240,7 +240,7 @@ python demo/bench_demo.py               # docs/demo_performance.md 재생성
 - **`--log`·`--resolve`**(사양 [`docs/prospective_log_spec.md`](docs/prospective_log_spec.md)): `--log <파일>`은 실행할 때마다 한 줄(JSON Lines: 저장 시각, asof, 입력 CSV·`b2_params.json`·`stratum_notes.json`의 sha256, 코드 커밋, 상태, 점예측·명목 범위, 뜬 안내 종류, 전향/후향 점검)을 추가한다. 좌표와 개별 기록 값은 저장하지 않고, 저장소 안 경로는 거부한다. `--resolve <파일> --data <CSV>`는 저장된 예측마다 [asof, asof+7일)의 첫 적격 5km를 피드백과 같은 규칙으로 연결해 결과 관측(범위 안/빠름/느림)·결과 미관측·7일 미경과·입력 부족으로 센다. 결과 미관측은 실패나 적중으로 세지 않고, 같은 미래 세션을 공유한 예측은 표시하며 독립 결과 수를 따로 센다. 1인 기록은 입력 연결·계산·표시 확인 사례이며 일반화 성능의 근거가 아니다.
 - **`--goal mm:ss`**: 목표(10:00~83:20)를 명목 범위와 비교해 "명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림" 중 하나와 예측−목표 차이(초)를 보여 준다. 범위 안·밖은 달성 확률이나 달성 가능 여부를 뜻하지 않으며 훈련 처방을 제공하지 않는다. 목표를 넣지 않으면 출력은 기존과 같다.
 - **명목 80% 범위 점검(탐색 결과)**(범위 규칙은 train 폴드 밖 잔차로만 정했고 test 결과로 바꾸지 않음, [`docs/interval_calibration_5km.md`](docs/interval_calibration_5km.md), [`docs/demo_interval_check.md`](docs/demo_interval_check.md)): test 포함률 cold-start 75.3%(352개). personalized 포함률은 학습 자료와 겹쳐 독립 평가가 아니므로(전체 442건 중 364건 중복, [`docs/interval_by_condition.md`](docs/interval_by_condition.md) 4절) 주 결과로 쓰지 않는다. cold-start 점추정은 명목 80%보다 낮고(사용자 단위 95% CI와 기존 범위 비교는 보정 문서), 개인에게 80%를 보장하지 않으며 원인은 미확인이다.
-- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 1회(CSV 읽기 제외) 중앙값 0.0241 ms, tracemalloc 최대 2,331바이트, 파라미터 파일 365바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).
+- **성능(PC CPU 한 대, 모바일 아님)**: B2 예측 계산만(CSV 읽기·요약 화면 조립 제외) 중앙값 0.0347 ms(tracemalloc 최대 5,735바이트), 요약 화면 조립까지(CSV 읽기 제외) 중앙값 0.2823 ms(tracemalloc 최대 145,076바이트), 파라미터 파일 632바이트. GBM·MLP 비교와 환경은 [`docs/demo_performance.md`](docs/demo_performance.md).
 - 이 데모는 원인 분석이나 훈련 처방이 아니며, 모델 정확도의 이점을 주장하지 않는다(현재 자료로 모델과 B2의 우열을 확정할 수 없어 가장 단순한 규칙을 택했다).
 
 ## 실행 방법

@@ -17,7 +17,7 @@
 예측: y_hat = a + b x (기준 기록 - m), 예상 기록 = 기준 기록 + y_hat.
 기준 시점까지 끝나지 않은 세션은 사용하지 않는다. 입력 검사는 예측 시점에 관측 가능한 값만 쓴다(미래 값으로 거르는 규칙 없음).
 입력·옵션 문제(파일, 형식, 날짜, --goal)는 프로그램이 멈추지 않고 '오류: 이유 / 해결: 방법'을 한국어로 출력한다(종료 코드 2).
-기본 출력은 요약 화면([결과]/[상태]/[안내]/[근거]/[주의]); --detail은 뒤에 기존 전체 출력(자세히 보기)을 그대로 붙인다(docs/demo_screen_spec.md).
+기본 출력은 요약 화면([결과]/[상태]/[안내]/[근거] 또는 예측 불가일 때 [해결]/[주의]); --detail은 뒤에 기존 전체 출력(자세히 보기)을 그대로 붙인다(docs/demo_screen_spec.md).
 --goal mm:ss: 예측 범위와 목표를 비교해 '명목 범위보다 빠름 / 명목 범위 안 / 명목 범위보다 느림' 중 하나를 보여준다(달성 확률·훈련 처방 아님).
 --feedback: 예측 뒤에 기준 시점 이후 7일 안 첫 5km 기록과 예측의 비교(범위 안·밖, 차이, 학습 자료 기준 비율)를 붙인다(처방·원인·실력 판정 아님; docs/demo_feedback_spec.md).
 """
@@ -842,6 +842,7 @@ CAUTION = "원인 분석·훈련 처방이 아닙니다."
 SUMMARY_TAIL = "--detail로 계산 과정과 근거 문서를 볼 수 있습니다."
 DETAIL_TAIL = "아래 자세히 보기에 계산 과정과 근거 문서가 있습니다."
 DETAIL_HEAD = "───── 자세히 보기(--detail): 기존 전체 출력 ─────"
+FIX_SUMMARY = "직전 28일 안의 달리기 기록(4회 이상)과 5.0~5.5km의 5km 기록 1회 이상(t5_sec 포함)을 CSV에 추가하거나 기록이 충분한 기준 시점(--asof)을 지정하면 예측할 수 있습니다."
 IND = "       "
 FB_SUMMARY_HEAD = "[뛴 다음의 피드백] 기준 시점 이후 첫 5km와 예측의 비교(다음 7일 안에 5km가 관측된 경우에 한함)"
 GOAL_SUMMARY_NO = "[목표 비교] 예측이 가능할 때만 표시합니다(위 [안내]의 부족한 조건 참고)."
@@ -882,7 +883,7 @@ def summary_lines(res, detail=False):
     if ok:
         L += _block("[근거]", ["평소 %s, 직전 %s → 예상 변화 약 %s초(기본 변화량 %s초 + 평소 대비 보정 %s초)" % (mmss(res["m"]), mmss(res["ref"]), signed(res["tot_int"]), signed1(res["a_term"]), signed1(res["b_term"]))])
     else:
-        L += _block("[근거]", ["해결: " + res["fix"]])
+        L += _block("[해결]", [FIX_SUMMARY])
     L.append("[주의] " + CAUTION + " " + (DETAIL_TAIL if detail else SUMMARY_TAIL))
     return L
 

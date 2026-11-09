@@ -301,7 +301,7 @@ def test_cli_input_problems_print_reason_and_fix_without_traceback():
         code, out = call([_csv(tmp, _rows_ok()), "--asof", "내일"])
         assert code == 2 and "기준 시점" in out and "해결:" in out
         code, out = call([_csv(tmp, _rows_ok(), "ok.csv"), "--asof", "2025-03-03T00:00:00"])       # 기록이 1970년이라 자격 미달이지만 멈추지 않는다
-        assert code == 0 and "예측할 수 없습니다" in out and "해결:" in out
+        assert code == 0 and "예측할 수 없습니다" in out and "[해결]" in out
 
 
 # ---------------------------------------------------------------- P4: 목표 비교 (--goal mm:ss)
@@ -1014,7 +1014,7 @@ def test_summary_keeps_required_phrases_status_and_line_budget():
         base = text.split("\n\n")[0].split("\n")
         assert len(base) <= 12, (out_name, len(base))                                                    # 기본 요약은 10줄 안팎
         labels = [l.split(" ")[0] for l in base if l.startswith("[")]
-        assert labels == ["[결과]", "[상태]", "[안내]", "[근거]", "[주의]"], (out_name, labels)
+        assert labels == ["[결과]", "[상태]", "[안내]", "[근거]" if res["eligible"] else "[해결]", "[주의]"], (out_name, labels)
         status = [l for l in base if l.startswith("[상태]")][0]
         assert "원인 분석·훈련 처방이 아닙니다" in text and "[상태]" in text
         if res["eligible"]:
@@ -1060,7 +1060,8 @@ def test_summary_notice_line_has_coverage_counts_and_development_label():
 def test_summary_status_variants_and_unobserved_with_feedback():
     with tempfile.TemporaryDirectory() as tmp:
         _r, short = cd.run(_csv(tmp, [(ASOF - 1800 - cd.DAY, ASOF - cd.DAY, 3.0, None)]), str(ASOF), P, now=NOW)
-        assert "[상태] [입력 부족]" in short and "[안내] 부족한 조건:" in short and "[근거] 해결:" in short and "예측할 수 없습니다" in short
+        assert "[상태] [입력 부족]" in short and "[안내] 부족한 조건:" in short and "[해결] " + cd.FIX_SUMMARY in short and "[근거]" not in short and "예측할 수 없습니다" in short
+        assert "지정하세요" not in short and "추가하세요" not in short and short.count("예측할 수 있습니다") == 1      # 명령형이 아닌 문장
         _r, warn = cd.run(_csv(tmp, _rows_ok(), "w.csv"), str(ASOF), P, now=NOW)
         assert "[상태] [조건별 검증 부족: 개발 결과 기준 경고]" in warn and "과거 유효 5km가 직전 기록 1개뿐: 학습 자료 교차검증 포함률 70.6%(109건/109명, 개발 결과)" in warn
         _r, clean = cd.run(_csv_stop(tmp, _rows_clean(), "c.csv"), str(ASOF), P, now=NOW)
@@ -1091,7 +1092,7 @@ def test_summary_numbers_are_checked_against_full_output():
 
 def test_summary_has_no_forbidden_expressions_outside_negated_sentences():
     import make_examples as mx
-    skip = ("[주의]", "달성 확률이나 달성 가능 여부를 뜻하지 않으며", "[근거] 해결:")                           # '원인·처방 아님'을 알리는 부정 문장(필수 문구)과 입력 부족의 해결 안내(기존 문구)
+    skip = ("[주의]", "달성 확률이나 달성 가능 여부를 뜻하지 않으며")                                          # '원인·처방 아님'을 알리는 부정 문장(필수 문구)만 예외
     for csv_name, goal, fb, out_name in _example_cases():
         text = (Path(mx.OUT) / out_name).read_text(encoding="utf-8")
         for l in text.split("\n"):
