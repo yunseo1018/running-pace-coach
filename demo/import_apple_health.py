@@ -9,6 +9,8 @@
 - t5_sec: 경로가 있고 거리가 5.0~5.5km일 때만. 연구 파이프라인(38_build_5km_dataset.py의 compute_t5 + 37의 cum_with_skip·01의 haversine/속도 임계)을 그대로 불러 쓴다
   (누적 haversine 5.000km 도달 시각의 인접 두 점 선형 보간, 세션 첫 점부터의 경과 시간). 이를 위해 numpy/pandas가 필요하다(시연 본체 coach_demo.py는 표준 라이브러리만 쓴다).
 - stop_sec: 같은 GPX에서 시간차 > 0이고 속도 1km/h 미만인 점 사이 구간의 시간 합(세션 전체; docs/posthoc_spec_b2_failure_5km.md 5절 3).
+- 판정 기준 정렬(docs/import_alignment_spec.md): 경로(GPX)가 있는 기록은 start_time·end_time·duration_sec를 GPX 첫·마지막 점 시각으로, distance_km를 GPX haversine 재계산(연구와 같은 함수)으로 정하고
+  건강 앱 거리는 distance_km_health에 남긴다(distance_src = gpx). 경로가 없으면 end_time = start_time + Workout duration 속성, distance_km = 건강 앱 거리(distance_src = health). 5.0~5.5km 판정은 distance_km 기준.
 - 시간대: start_time·end_time은 +0900 등 표기를 바꾸지 않고 현지 벽시계 시각 그대로(시간대 표기 없이) 적는다. coach_demo는 표기 없는 시각을 UTC로 두고 일관되게 쓰므로 --asof도 같은 벽시계(한국 시각)로 지정하면 된다.
 - 좌표는 어디에도 저장하거나 출력하지 않는다. 출력 CSV(개인 건강 데이터)는 저장소 밖에 두며 --out이 저장소 안이면 경고하고 멈춘다.
 """
@@ -19,7 +21,7 @@ import os
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -29,7 +31,7 @@ DIST_TYPE = "HKQuantityTypeIdentifierDistanceWalkingRunning"
 HR_TYPE = "HKQuantityTypeIdentifierHeartRate"
 KM_LO, KM_HI = 5.0, 5.5
 STOP_KMH = 1.0
-COLUMNS = ["start_time", "end_time", "distance_km", "duration_sec", "avg_hr", "t5_sec", "stop_sec", "source"]
+COLUMNS = ["start_time", "end_time", "distance_km", "duration_sec", "avg_hr", "t5_sec", "stop_sec", "source", "distance_src", "distance_km_health"]
 _RESEARCH = None
 
 
@@ -89,7 +91,8 @@ def _km(value, unit):
 
 def _workout(el):
     """Workout 요소 -> dict. 자식 요소는 이 시점에 모두 읽혀 있다."""
-    d = {"start": el.get("startDate"), "end": el.get("endDate"), "src": el.get("sourceName") or "", "km": None, "hr": None, "route": None}
+    d = {"start": el.get("startDate"), "end": el.get("endDate"), "src": el.get("sourceName") or "", "km": None, "hr": None, "route": None,
+         "dur_s": _duration_sec(el.get("duration"), el.get("durationUnit"))}
     for ch in el:
         if ch.tag == "WorkoutStatistics":
             if ch.get("type") == DIST_TYPE and ch.get("sum") is not None:
@@ -162,28 +165,53 @@ def t5_from_points(ts, lat, lon):
     return float(mod.compute_t5(parse, {"latitude": lat, "longitude": lon, "timestamp": ts}, ts[0]))
 
 
+def _duration_sec(value, unit):
+    """Workout duration 속성 -> 초. 단위 min/sec/hr(없으면 min로 보지 않고 None)."""
+    if value is None:
+        return None
+    v = float(value)
+    u = (unit or "").lower()
+    if u in ("min", "minute", "minutes"):
+        return v * 60.0
+    if u in ("s", "sec", "second", "seconds"):
+        return v
+    if u in ("hr", "h", "hour", "hours"):
+        return v * 3600.0
+    return None
+
+
+def wall_from_epoch(ep, offset_sec):
+    """UTC 에포크 초 + 오프셋(초) -> 현지 벽시계 naive datetime(시간대 표기 없음)."""
+    return datetime.fromtimestamp(ep + offset_sec, tz=timezone.utc).replace(tzinfo=None)
+
+
 def build_rows(zip_path):
-    """ZIP -> (CSV 행 목록, 이유별 개수). 좌표·개별 값은 반환하지 않는다."""
-    _mod, parse = load_research()
+    """ZIP -> (CSV 행 목록, 이유별 개수). 좌표·개별 값은 반환하지 않는다. 판정 기준은 docs/import_alignment_spec.md."""
+    mod, parse = load_research()
     st = {"달리기 전체": 0, "CSV에 쓴 달리기": 0, "거리 정보 없어 제외": 0, "경로가 있는 기록": 0, "t5 계산됨": 0,
-          "t5 비움: 거리가 5.0~5.5km 아님": 0, "t5 비움: 5km 후보인데 경로 없음": 0, "t5 비움: 경로 파일 없음·읽기 실패": 0, "t5 비움: 경로 거리 5km 미달": 0}
+          "t5 비움: 거리가 5.0~5.5km 아님": 0, "t5 비움: 5km 후보인데 경로 없음": 0, "t5 비움: 경로 파일 없음·읽기 실패": 0, "t5 비움: 경로 거리 5km 미달": 0,
+          "거리 출처 gpx(GPX 점 재계산)": 0, "거리 출처 health(건강 앱)": 0,
+          "5km 판정이 바뀐 기록: 후보가 됨(건강 앱 거리 기준 아님 → GPX 거리 기준 5.0~5.5km)": 0, "5km 판정이 바뀐 기록: 후보에서 빠짐(건강 앱 거리 기준 5.0~5.5km → GPX 거리 기준 아님)": 0,
+          "종료 시각·경과 시간을 GPX 점 시각으로 정한 기록": 0, "종료 시각을 시작+duration 속성으로 정한 기록(경로 없음)": 0, "duration 속성이 없어 종료−시작을 쓴 기록": 0,
+          "기존 방식(종료−시작)과 경과 시간이 60초 넘게 다른 기록": 0}
     rows = []
     with zipfile.ZipFile(zip_path) as zf:
         main, gpx = find_members(zf)
         with zf.open(main) as xml:
             for w in iter_workouts(xml):
                 st["달리기 전체"] += 1
-                if w["km"] is None or not w["start"] or not w["end"]:
+                if not w["start"]:
                     st["거리 정보 없어 제외"] += 1
                     continue
                 s_wall, s_ep = parse_apple_time(w["start"])
-                e_wall, e_ep = parse_apple_time(w["end"])
-                cand = KM_LO <= w["km"] <= KM_HI
-                t5 = stop = None
+                e_ep = parse_apple_time(w["end"])[1] if w["end"] else None
+                offset = (s_wall - datetime(1970, 1, 1)).total_seconds() - s_ep        # Workout 시작 시각의 UTC 오프셋(초)
+                health_km = w["km"]
+                health_cand = health_km is not None and KM_LO <= health_km <= KM_HI
+                pts = None
                 if w["route"]:
                     st["경로가 있는 기록"] += 1
                     member = gpx.get(w["route"])
-                    pts = None
                     if member:
                         try:
                             with zf.open(member) as g:
@@ -191,25 +219,61 @@ def build_rows(zip_path):
                         except (ET.ParseError, ValueError, KeyError):
                             pts = None
                     if not pts or len(pts[0]) < 2:
-                        if cand:
+                        pts = None
+                        if health_cand:
                             st["t5 비움: 경로 파일 없음·읽기 실패"] += 1
+                if pts is None and health_km is None:
+                    st["거리 정보 없어 제외"] += 1
+                    continue
+                stop = t5 = None
+                if pts:
+                    ts, lat, lon = pts
+                    cum, _skipped = mod.feas.cum_with_skip(parse, lat, lon, ts)
+                    dist = round(float(cum[-1]), 3)                                     # 연구와 같은 함수(haversine + 스킵 규칙)
+                    src_d = "gpx"
+                    start_wall, end_wall = wall_from_epoch(ts[0], offset), wall_from_epoch(ts[-1], offset)
+                    dur = int(round(ts[-1] - ts[0]))
+                    stop = stop_seconds(parse, ts, lat, lon)
+                    st["종료 시각·경과 시간을 GPX 점 시각으로 정한 기록"] += 1
+                    st["거리 출처 gpx(GPX 점 재계산)"] += 1
+                else:
+                    dist = round(health_km, 3)
+                    src_d = "health"
+                    dur_attr = w.get("dur_s")
+                    if dur_attr is not None:
+                        dur_f = dur_attr
+                        st["종료 시각을 시작+duration 속성으로 정한 기록(경로 없음)"] += 1
+                    elif e_ep is not None:
+                        dur_f = e_ep - s_ep
+                        st["duration 속성이 없어 종료−시작을 쓴 기록"] += 1
                     else:
-                        ts, lat, lon = pts
-                        stop = stop_seconds(parse, ts, lat, lon)
-                        if cand:
-                            t5 = t5_from_points(ts, lat, lon)
-                            if t5 is None:
-                                st["t5 비움: 경로 거리 5km 미달"] += 1
-                            else:
-                                st["t5 계산됨"] += 1
-                        del pts, ts, lat, lon
-                elif cand:
+                        st["거리 정보 없어 제외"] += 1
+                        continue
+                    start_wall = s_wall
+                    dur = int(round(dur_f))
+                    end_wall = s_wall + timedelta(seconds=dur)
+                    st["거리 출처 health(건강 앱)"] += 1
+                if e_ep is not None and abs((e_ep - s_ep) - dur) > 60:
+                    st["기존 방식(종료−시작)과 경과 시간이 60초 넘게 다른 기록"] += 1
+                cand = KM_LO <= dist <= KM_HI
+                if src_d == "gpx" and cand != health_cand:
+                    st["5km 판정이 바뀐 기록: 후보가 됨(건강 앱 거리 기준 아님 → GPX 거리 기준 5.0~5.5km)" if cand else "5km 판정이 바뀐 기록: 후보에서 빠짐(건강 앱 거리 기준 5.0~5.5km → GPX 거리 기준 아님)"] += 1
+                if pts and cand:
+                    t5 = t5_from_points(ts, lat, lon)
+                    if t5 is None:
+                        st["t5 비움: 경로 거리 5km 미달"] += 1
+                    else:
+                        st["t5 계산됨"] += 1
+                elif pts is None and cand and not w["route"]:
                     st["t5 비움: 5km 후보인데 경로 없음"] += 1
                 if not cand:
                     st["t5 비움: 거리가 5.0~5.5km 아님"] += 1
+                if pts:
+                    del pts, ts, lat, lon
                 src = "애플워치" if ("Watch" in w["src"] or "워치" in w["src"]) else "기타"
-                rows.append([s_wall.strftime("%Y-%m-%dT%H:%M:%S"), e_wall.strftime("%Y-%m-%dT%H:%M:%S"), round(w["km"], 3), int(round(e_ep - s_ep)),
-                             "" if w["hr"] is None else round(w["hr"], 1), "" if t5 is None else round(t5, 3), "" if stop is None else round(stop, 1), src])
+                rows.append([start_wall.strftime("%Y-%m-%dT%H:%M:%S"), end_wall.strftime("%Y-%m-%dT%H:%M:%S"), dist, dur,
+                             "" if w["hr"] is None else round(w["hr"], 1), "" if t5 is None else round(t5, 3), "" if stop is None else round(stop, 1), src,
+                             src_d, "" if health_km is None else round(health_km, 3)])
                 st["CSV에 쓴 달리기"] += 1
     rows.sort(key=lambda r: r[0])
     return rows, st

@@ -22,7 +22,7 @@
 python demo/coach_demo.py demo/examples/ex2_slower_last.csv --asof 2025-03-03T00:00:00
 python demo/coach_demo.py demo/examples/ex1_steady.csv --asof 2025-03-03T00:00:00 --goal 24:00   # 목표 비교(예측 범위와 목표를 비교)
 python demo/test_coach_demo.py          # 단위 테스트(pytest 없이 실행 가능, 69개)
-python demo/test_import_apple_health.py # 애플 건강 가져오기 테스트(합성 XML·GPX, numpy/pandas 필요, 8개)
+python demo/test_import_apple_health.py # 애플 건강 가져오기 테스트(합성 XML·GPX, numpy/pandas 필요, 10개)
 python demo/make_examples.py            # 합성 예시 CSV 재생성(seed 고정)
 python demo/coach_demo.py demo/examples/ex13_feedback_inside.csv --asof 2025-03-03T00:00:00 --feedback   # 뛴 다음의 피드백(기준 시점 이후 7일 안 첫 5km와 예측 비교)
 python demo/coach_demo.py <CSV> --asof 2025-03-03T00:00:00 --log <저장소 밖 폴더>/predictions.mine.jsonl   # 예측 저장(JSON Lines 한 줄 추가)
@@ -286,7 +286,7 @@ python demo/bench_demo.py               # docs/demo_performance.md 재생성
   1. 아이폰 건강 앱 > 프로필 > '모든 건강 데이터 내보내기'로 만든 ZIP을 저장소 밖 폴더(예: `<저장소 밖 폴더>/my_runs/`)에 둔다.
   2. `python demo/import_apple_health.py --zip <저장소 밖 폴더>/my_runs/내보내기.zip --out <저장소 밖 폴더>/my_runs/runs.mine.csv` (경로가 있는 애플워치 기록만 `t5_sec`·`stop_sec`가 채워지고, 끝에 이유별 개수를 요약한다. `--out`이 저장소 안이면 멈춘다.)
   3. `python demo/coach_demo.py <저장소 밖 폴더>/my_runs/runs.mine.csv --asof 2025-10-20T00:00:00` (+ 선택 `--goal 24:00`)
-  - 시각은 +0900 표기를 바꾸지 않고 현지 벽시계 그대로(시간대 표기 없이) 적으므로 `--asof`도 한국 시각으로 지정한다. `avg_hr`는 선택 열이고 예측에 쓰지 않는다. 좌표는 어디에도 저장·출력하지 않는다. t5는 연구 파이프라인 함수(`38_build_5km_dataset.compute_t5`)를 그대로 불러 쓰므로 numpy/pandas가 필요하다.
+  - 시각은 +0900 표기를 바꾸지 않고 현지 벽시계 그대로(시간대 표기 없이) 적으므로 `--asof`도 한국 시각으로 지정한다. `avg_hr`는 선택 열이고 예측에 쓰지 않는다. 좌표는 어디에도 저장·출력하지 않는다. t5는 연구 파이프라인 함수(`38_build_5km_dataset.compute_t5`)를 그대로 불러 쓰므로 numpy/pandas가 필요하다. 판정 기준은 연구 데이터와 맞춘다([`docs/import_alignment_spec.md`](docs/import_alignment_spec.md)): 경로(GPX)가 있는 기록은 시작·종료 시각과 경과 시간을 GPX 점 시각으로, 거리를 GPX haversine 재계산(건강 앱 거리는 `distance_km_health`, 출처는 `distance_src`)으로 정하고 5.0~5.5km 판정도 그 거리 기준이다. 경로가 없으면 종료 시각 = 시작 + Workout `duration` 속성, 거리 = 건강 앱 거리다.
 - **`--feedback`**(사양 [`docs/demo_feedback_spec.md`](docs/demo_feedback_spec.md)): 기준 시점(`--asof`) 이후 7일 안에 시작한 5.0~5.5km 달리기 중 `t5_sec`가 있는 가장 이른 기록(극단도 제외하지 않음)을 예측과 비교해 실제 기록, 차이(실제 − 예측, 초), 명목 범위 대비 위치(범위보다 빠름 / 범위 안 / 범위보다 느림), 학습 자료에서 그만큼 이상 빨랐거나 느렸던 경우의 비율을 보여 준다. 비율은 범위 보정과 같은 train 폴드 밖 B2 잔차의 1%~99% 분위수 표([`demo/feedback_quantiles.json`](demo/feedback_quantiles.json), 집계값만 있음)를 선형 보간한 값이며 test 자료는 쓰지 않는다. 비교할 기록이 없거나 7일이 아직 지나지 않았으면 그렇게 알려 준다. 범위 안·밖은 실력 변화의 증거가 아니고 1회 관측이며 예측 성능의 근거가 아니다(고정 문장으로 항상 표시). 처방·원인 설명·실력 변화 판정·달성 확률은 하지 않는다. `--feedback`이 없으면 출력은 기존과 같다.
 - **화면 상태 표시**(사양 [`docs/prospective_log_spec.md`](docs/prospective_log_spec.md) 3절): 예측 첫 줄 바로 아래에 "다음 7일 안 적격 5km 기록이 관측되는 경우에 대한 예측입니다(명목 80% 범위)"와 실측 포함률(cold-start test, 탐색 결과)을 붙인다. 상태는 셋으로 구분한다: **[입력 부족]**(자격 미달로 예측 없음), **[조건별 검증 부족: 개발 결과 기준 경고]**(조건별 안내가 뜰 때, train 폴드 밖 개발 결과 기준이며 새 자료로 확인되지 않았음), **[결과 미관측]**(`--feedback`에서 7일이 지났는데 적격 기록이 없을 때).
 - **`--log`·`--resolve`**(사양 [`docs/prospective_log_spec.md`](docs/prospective_log_spec.md)): `--log <파일>`은 실행할 때마다 한 줄(JSON Lines: 저장 시각, asof, 입력 CSV·`b2_params.json`·`stratum_notes.json`의 sha256, 코드 커밋, 상태, 점예측·명목 범위, 뜬 안내 종류, 전향/후향 점검)을 추가한다. 좌표와 개별 기록 값은 저장하지 않고, 저장소 안 경로는 거부한다. `--resolve <파일> --data <CSV>`는 저장된 예측마다 [asof, asof+7일)의 첫 적격 5km를 피드백과 같은 규칙으로 연결해 결과 관측(범위 안/빠름/느림)·결과 미관측·7일 미경과·입력 부족으로 센다. 결과 미관측은 실패나 적중으로 세지 않고, 같은 미래 세션을 공유한 예측은 표시하며 독립 결과 수를 따로 센다. 1인 기록은 입력 연결·계산·표시 확인 사례이며 일반화 성능의 근거가 아니다.
