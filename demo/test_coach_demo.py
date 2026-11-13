@@ -227,6 +227,34 @@ def test_duplicate_records_same_start_end_removed_with_notice():
         assert notes == []
 
 
+def test_overlapping_records_within_60s_counted_once_keeping_route_record():
+    """시작 10초 차이로 겹치는 두 기록(하나는 경로=stop_sec 있음) -> 1건, 경로 있는 쪽이 남는다. 겹치지 않는 연속 기록은 그대로."""
+    with tempfile.TemporaryDirectory() as tmp:
+        s0 = ASOF - 2 * cd.DAY
+        rows = [(s0, s0 + 1500, 3.36, None, None),            # 경로 없음(더 짧음)
+                (s0 + 10, s0 + 1900, 5.8, None, 120.0),       # 시작 10초 차이, 경로 있음
+                (s0 + 1900, s0 + 3000, 4.0, None, None),      # 앞 기록이 끝난 뒤 이어진 기록(겹치지 않음)
+                (s0 - cd.DAY, s0 - cd.DAY + 1800, 5.1, 1500.0, 100.0)]
+        sess, notes = cd.load_sessions(_csv_stop(tmp, rows), NOW)
+        assert len(sess) == 3 and len(notes) == 1 and "시간이 겹치는 기록 2건을 1건으로 처리" in notes[0]
+        assert sorted(s["km"] for s in sess) == [4.0, 5.1, 5.8] and 3.36 not in [s["km"] for s in sess]
+        # 경로가 없는 쪽이 더 길어도 경로 있는 기록을 남긴다
+        rows2 = [(s0, s0 + 3000, 6.0, None, None), (s0 + 10, s0 + 900, 3.0, None, 50.0)]
+        sess2, notes2 = cd.load_sessions(_csv_stop(tmp, rows2, "b.csv"), NOW)
+        assert len(sess2) == 1 and sess2[0]["km"] == 3.0 and "2건을 1건" in notes2[0]
+        # 경로 정보가 같으면 더 긴 기록, 그것도 같으면 먼저 시작한 기록
+        rows3 = [(s0, s0 + 600, 2.0, None, None), (s0 + 30, s0 + 1800, 4.0, None, None)]
+        assert [s["km"] for s in cd.load_sessions(_csv_stop(tmp, rows3, "c.csv"), NOW)[0]] == [4.0]
+        # 시작 시각 차이가 60초를 넘으면 겹쳐도 별개 기록(연구 규칙의 60초 조건)
+        rows4 = [(s0, s0 + 1800, 4.0, None, None), (s0 + 61, s0 + 1900, 4.0, None, None)]
+        sess4, notes4 = cd.load_sessions(_csv_stop(tmp, rows4, "d.csv"), NOW)
+        assert len(sess4) == 2 and notes4 == []
+        # 겹치지 않는 연속 기록만 있으면 안내 없음
+        rows5 = [(s0, s0 + 600, 2.0, None, None), (s0 + 600, s0 + 1200, 2.0, None, None)]
+        sess5, notes5 = cd.load_sessions(_csv_stop(tmp, rows5, "e.csv"), NOW)
+        assert len(sess5) == 2 and notes5 == []
+
+
 def test_shortfall_shows_what_and_how_many_are_missing():
     r = cd.assess([S(1), S(5)], ASOF, P)
     assert not r["eligible"]

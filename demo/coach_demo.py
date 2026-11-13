@@ -166,7 +166,46 @@ def load_sessions(path, now=None):
     n_dup = len(kept) - len(uniq)
     if n_dup:
         notices.append("시작·종료 시각이 같은 중복 기록 %d개는 먼저 나온 한 개만 남기고 제외했습니다. 중복 줄을 지우면 이 안내가 사라집니다." % n_dup)
+    uniq, n_in, n_out = merge_overlapping(uniq)
+    if n_in:
+        notices.append("시간이 겹치는 기록 %d건을 %d건으로 처리했습니다(시작 시각 차이 %d초 이하이고 시간 구간이 겹치는 기록은 하나로 세며, 경로가 있는 기록을 남김)." % (n_in, n_out, OVERLAP_START_SEC))
     return uniq, notices
+
+
+OVERLAP_START_SEC = 60     # 연구 파이프라인(16_duplicate_dedup.py NEAR_SIMULTANEOUS_START_SEC)과 같은 값
+
+
+def merge_overlapping(sessions):
+    """연구 파이프라인의 중복 제거 규칙(시작 시각 차이 <= 60초 + 시간 구간 겹침; 시작 좌표 50m 조건은 CSV에 좌표가 없어 적용 불가)을 같게 적용한다.
+    겹치는 기록 묶음에서 하나만 남긴다: 경로가 있는 기록(stop_sec 있음) → 더 긴 기록 → 먼저 시작한 기록 순. 돌려주는 값: (세션 목록, 묶음에 든 기록 수, 묶음 수)."""
+    order = sorted(range(len(sessions)), key=lambda i: (sessions[i]["start"], sessions[i]["end"]))
+    parent = list(range(len(sessions)))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for a_pos, i in enumerate(order):
+        a = sessions[i]
+        for j in order[a_pos + 1:]:
+            b = sessions[j]
+            if b["start"] - a["start"] > OVERLAP_START_SEC:
+                break
+            if max(a["start"], b["start"]) < min(a["end"], b["end"]):
+                parent[find(j)] = find(i)
+    groups = {}
+    for i in order:
+        groups.setdefault(find(i), []).append(i)
+    keep, n_in, n_groups = set(), 0, 0
+    for members in groups.values():
+        if len(members) > 1:
+            n_in += len(members)
+            n_groups += 1
+        best = min(members, key=lambda i: (sessions[i]["stop"] is None, -(sessions[i]["end"] - sessions[i]["start"]), sessions[i]["start"], i))
+        keep.add(best)
+    return [s for i, s in enumerate(sessions) if i in keep], n_in, n_groups
 
 
 def read_sessions(path):
